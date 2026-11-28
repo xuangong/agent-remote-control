@@ -193,6 +193,8 @@ export interface PrimarySessionGroupPane {
   id: string; title: string; width: number; additionalWidth?: number;
   collapsed: boolean; selected: boolean; content: ReactNode;
   fold?: FoldedBot;
+  /** A tile the Window does not store (a bot workbench's derived tile): it has no remove or close control. */
+  permanent?: boolean;
 }
 /** How wide a folded bot's slim card stands: room for its picture, its name running down the card and its role tag. */
 export const FOLDED_BOT_WIDTH = 64;
@@ -301,9 +303,9 @@ function PrimaryGroupPane({ group, compact, stacked = false, minimizedHeader, on
     <div id={contentId} className="lab-primary-group-content" hidden={minimized}>{group.content}</div>
     {minimized ? minimizedHeader : null}
     {/* A folded bot is removed from its group only on request; other views close at once. */}
-    {minimized && group.fold && onRemove ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.removeLabel', { title: group.title })}
+    {minimized && group.fold && onRemove && !group.permanent ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.removeLabel', { title: group.title })}
       title={t('windows.group.removeHint')} onClick={() => onRemove(group.id)}>×</button>
-      : minimized && onClose ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.closeLabel', { title: group.title })}
+      : minimized && onClose && !group.permanent ? <button type="button" data-pane-selection-ignore className="lab-primary-group-close" aria-label={t('windows.group.closeLabel', { title: group.title })}
       title={t('windows.closeView.hint')} onClick={() => onClose(group.id)}>×</button> : null}
     {minimized && group.fold ? <FoldedBotCard label={t('windows.group.restore', { title: group.title })} fold={group.fold} controls={contentId} onRestore={() => onCollapse?.(group.id, false)} />
     : minimized ? <button type="button" className="lab-session-main-restore" aria-label={t('windows.group.restore', { title: group.title })} aria-controls={contentId} aria-expanded={false}

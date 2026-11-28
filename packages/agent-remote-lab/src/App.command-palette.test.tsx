@@ -2,6 +2,7 @@ import { act } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWindowView, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { botGroup, botTarget, mountBotApp, seedGroup, until, visibleButton } from './test/bot-mode-fixtures.js';
+import { chooseFreeWorkbench } from './test/new-workbench.js';
 
 // jsdom has no modal dialogs; like browsers, closing queues the close event. The stubs are removed after each test.
 const dialogMethods = ['showModal', 'close'] as const;
@@ -145,6 +146,7 @@ it('selects a bot from Bot mode, and opens a Window from Bot mode in Window mode
     await app.switchMode('bot');
     await shortcut();
     await search(app.container, 'New group');
+    await chooseFreeWorkbench();
     await until(() => expect(app.workspace().window?.id).toMatch(/^(?!(A|R|S)$)/));
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
     expect(app.workspace().window?.id).toMatch(/^(?!(A|R|S)$)/);

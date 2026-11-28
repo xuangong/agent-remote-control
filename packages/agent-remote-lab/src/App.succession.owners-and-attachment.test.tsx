@@ -19,6 +19,8 @@ import * as attentionHooks from './kernel/useSessionAttention.js';
 import * as managerComponents from './features/sessions/ChatSessionManager.js';
 import * as windowWorkspaceHooks from './features/windows/useWindowWorkspace.js';
 import { act, cleanups, committed, failureFixture, native, saveSessionComposition, settleApp, settleAppEagerly, visibleQuery, waitFor } from './App.succession.fixture.js';
+import { chooseFreeWorkbench, stubDialogs } from './test/new-workbench.js';
+stubDialogs();
 
 it('rejects a retired source after awaiting Ask relations before creating any native target', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -395,6 +397,7 @@ it.each(['B', 'D'])('restores the selected Window owner while a new %s Window ke
   const createWindow = [...f.view.querySelectorAll<HTMLButtonElement>('.lab-window-panel button')].find(button => button.textContent === 'New group')!;
   expect(createWindow).toBeDefined();
   await act(async () => createWindow.click());
+  await chooseFreeWorkbench();
   await settleAppEagerly(() => expect(new URL(window.location.href).searchParams.get('window')).not.toBe(windowId));
   await act(async () => manager.onOpen({ hostId: 'host', providerId: 'recorded', nativeSessionId: selected, title: `Independent ${selected}` }));
   await settleAppEagerly(() => expect(succession.binding?.session.nativeSessionId).toBe(selected));

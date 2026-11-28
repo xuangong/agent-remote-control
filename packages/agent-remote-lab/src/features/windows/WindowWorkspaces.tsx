@@ -1,6 +1,7 @@
 import './window-workspaces.css';
 import { listPresentation } from '../../kernel/known-list.js';
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
+import { BotWorkbenchContext } from './BotWorkbenchContext.js';
 import { createWindowView, hasBotAppearance, isBotView, type WindowBotDetails, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
 import type { useWindowWorkspace } from './useWindowWorkspace.js';
 import { useWindowActions, windowCatalog } from './useWindowActions.js';
@@ -154,7 +155,8 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
     try { if (await save(id, next)) closeRename(); }
     finally { setSaving(false); }
   }
-  const createWindow = () => void run(workspace.create);
+  const workbench = useContext(BotWorkbenchContext);
+  const createWindow = () => { if (workbench) workbench.request('new'); else void run(workspace.create); };
   function createView() {
     const view = createWindowView(crypto.randomUUID());
     edit({ type: 'batch', operations: [{ type: 'view.create', view }, { type: 'view.select', viewId: view.id }] });
@@ -166,12 +168,13 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       : <div className="lab-window-section-heading"><span>{t('windows.heading')}</span><button type="button" disabled={busy} onClick={createWindow}>{t('windows.newWindow')}</button></div>}
     <nav className="lab-window-list" aria-label={t('windows.heading')}>{catalog.map(window => {
       const status = sessionStatus && windowStatus(window, sessionStatus);
+      const bound = workbench?.boundTo(window);
       const renameLabel = t('windows.rename.label', { title: window.title }), deleteLabel = t('windows.delete.label', { title: window.title });
       const renameDisabled = !!renaming || (window.id === workspace.window?.id && workspace.unavailable);
       const deleteTitle = !workspace.hasActiveWindow ? t('windows.delete.needWindow') : window.id === workspace.window?.id ? t('windows.delete.switchFirst') : t('windows.delete.hint');
       const deleteDisabled = busy || !workspace.hasActiveWindow || window.id === workspace.window?.id;
       const remove = () => startDelete(window);
-      return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-renaming={renaming?.id === window.id || undefined}>
+      return <div key={window.id} className="lab-window-row" data-window-row={window.id} data-bot-workbench={bound?.botId} title={bound ? t('windows.workbench.kind.bot', { name: bound.name }) : undefined} data-renaming={renaming?.id === window.id || undefined}>
       {renaming?.id === window.id ? <form className="lab-window-rename" aria-label={renameLabel} onKeyDown={event => {
         if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); if (!saving) closeRename(); }
       }} onSubmit={event => { event.preventDefault(); void saveRename(window.id); }}>
@@ -182,7 +185,7 @@ export function WindowWorkspaces({ workspace, current, active = true, sessionSta
       </form> : <>
       <button type="button" className="lab-window-open" data-window-id={window.id}
       aria-current={window.id === workspace.window?.id || undefined} aria-busy={openingId === window.id || undefined} onClick={() => void openWindow(window.id)}>
-      <span><strong>{window.title}</strong><small>{openingId === window.id ? t('windows.opening') : <>{liveState(status) ? <><StatusWord state={liveState(status)!} /> · </> : null}{windowSummary(window.views, viewId => !!workspace.readGroup?.(window.id)?.bots?.members[viewId]?.asleep, t)}</>}</small></span>
+      <span><strong>{bound ? bound.name : window.title}</strong><small>{openingId === window.id ? t('windows.opening') : <>{liveState(status) ? <><StatusWord state={liveState(status)!} /> · </> : null}{windowSummary(window.views, viewId => !!workspace.readGroup?.(window.id)?.bots?.members[viewId]?.asleep, t)}</>}</small></span>
       {window.id === workspace.window?.id && !sidebar ? <span className="lab-window-selected" aria-label={t('windows.currentWindow')}>✓</span> : null}
       </button>
       {sidebar ? <>

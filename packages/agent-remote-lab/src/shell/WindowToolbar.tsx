@@ -11,7 +11,7 @@ import './shell.css';
  * description. That keeps it apart from the sidebar row's "Rename Window: …" control, on screen with it.
  */
 export function WindowToolbar({ windowId, title, summary, leading, launchers, disabled, readOnly, deleteDisabled, onRename, onNewView, onOpenSession,
-  botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete }: {
+  botAppearance, onBotAppearance, onCopyLink, onAgentControl, onDelete, workbench }: {
   /** The Window shown; when another one takes the toolbar, an open rename ends without saving. */
   windowId: string; title: string; leading?: ReactNode; disabled?: boolean;
   /** The Track, Team, Window and Ask entries, in a row of the toolbar, when the sidebar does not hold them. */
@@ -25,6 +25,8 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
   onRename(title: string): void;
   onNewView(): void; onOpenSession(): void;
   /** Whether the Window's group appears in Bot mode; undefined leaves the toggle out (no group to change). */
+  /** The bot the Window follows, when it is a bot workbench; the menu then offers Unbind, otherwise Bind. */
+  workbench?: { boundName?: string; onBind(): void; onUnbind(): void };
   botAppearance?: boolean; onBotAppearance(shown: boolean): void; onCopyLink(): void; onAgentControl?(): void; onDelete(): void;
 }) {
   const t = useTranslate();
@@ -66,6 +68,9 @@ export function WindowToolbar({ windowId, title, summary, leading, launchers, di
     if (save && next && next !== title) onRename(next);
   };
   const actions: MenuEntry[] = [
+    ...(workbench ? [workbench.boundName
+      ? { label: t('windows.workbench.menu.unbind', { name: workbench.boundName }), icon: 'link', disabled: readOnly, onSelect: workbench.onUnbind } as const
+      : { label: t('windows.workbench.menu.bind'), icon: 'link', disabled: readOnly, onSelect: workbench.onBind } as const] : []),
     ...(botAppearance === undefined ? [] : [botAppearance
       ? { label: t('navigation.windowToolbar.hideInBot'), icon: 'eye-off', disabled: readOnly, onSelect: () => onBotAppearance(false) } as const
       : { label: t('navigation.windowToolbar.showInBot'), icon: 'sidebar', disabled: readOnly, onSelect: () => onBotAppearance(true) } as const]),

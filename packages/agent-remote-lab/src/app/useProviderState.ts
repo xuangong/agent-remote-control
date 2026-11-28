@@ -2,7 +2,8 @@
 import { useLiveBudget } from '../kernel/useLiveBudget.js';
 import type { Team, AgentProviderDescriptor } from '@orchardworks/agent-remote-protocol';
 import { remoteSessionState, type RemoteSessionState, type AgentReplicaState } from '@orchardworks/agent-client';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { readStoredTasks, writeStoredTasks } from '../kernel/team-roster-store.js';
 import type { CompositionDocument } from '../kernel/session-composition-model.js';
 import type { OpenedSession } from '../kernel/directory-client.js';
 import { sessionKey } from '../kernel/session-tree.js';
@@ -39,7 +40,12 @@ export function useProviderState(scope: Pick<AppInputs & RequestedSessionSlice &
   const draftStores = useMemo(() => new Map([[baseUrl, messageDrafts]]), [baseUrl, messageDrafts]);
 
   // Tasks travel as Teams on the Relay and are kept apart: they are not Teams to the roster, Track or roles.
-  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[]; tasks?: Team[] }>();
+  // The tasks last read stand in until the Relay answers, so a workbench draws at launch from what this device holds.
+  const [teamRoster, setTeamRoster] = useState<{ baseUrl: string; teams: Team[]; tasks?: Team[] } | undefined>(() => {
+    const tasks = readStoredTasks(baseUrl);
+    return tasks ? { baseUrl, teams: [], tasks } : undefined;
+  });
+  useEffect(() => { if (teamRoster?.tasks && teamRoster.baseUrl === baseUrl) writeStoredTasks(baseUrl, teamRoster.tasks); }, [baseUrl, teamRoster?.tasks]);
 
   const teamRosterRef = useRef(teamRoster);
  teamRosterRef.current = teamRoster;

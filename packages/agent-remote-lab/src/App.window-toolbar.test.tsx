@@ -211,7 +211,7 @@ it('shows a cached Window read-only during a cold start: only Copy link acts, an
     await pick('Add', 'New session view');
     await press(document.querySelector('[role="menu"][aria-label="Add"]') ?? document.body, 'Escape');
     await open('Group actions');
-    expect(disabled('Group actions')).toEqual(['Hide in Bot mode', 'Delete group…']);
+    expect(disabled('Group actions')).toEqual(['Bind to a bot…', 'Hide in Bot mode', 'Delete group…']);
     await pick('Group actions', 'Delete group…');
     expect(sheet('Delete this group?')).toBeUndefined();
     await pick('Group actions', 'Hide in Bot mode');

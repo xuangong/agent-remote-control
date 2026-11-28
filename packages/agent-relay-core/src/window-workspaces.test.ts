@@ -568,3 +568,17 @@ it('stores a group\'s mute and notifications and a chat\'s mute, and reads them 
   expect((await restarted.call('/quiet')).body.bots.members.review.muted).toBe(true);
   expect((await operate('bad', 2, { type: 'section.settings', notifications: 'none' })).status).toBe(400);
 });
+
+it('stores a bot workbench\'s tagged main tile and Window-only presentation and reads them back after a restart', async () => {
+  const workbench = JSON.parse(readFileSync(new URL('../../agent-remote-protocol/src/fixtures/window-bot-workbench.v1.json', import.meta.url), 'utf8'));
+  const window: WorkspaceWindow = { ...workbench.window, views: workbench.window.views.map((view: WorkspaceWindow['views'][number]) => ({ ...view, binding: { ...binding, nativeSessionId: view.id } })) };
+  const f = await fixture({ ...emptyRelayState(auth), workspaceWindows: [{ subject: 'alice', id: window.id, window, generation: 0, receipts: [], presentation: workbench.presentation }] });
+  const read = async (call: typeof f.call) => (await call(`/${workbench.window.id}`)).body;
+  expect((await read(f.call)).window.views[0].feature).toEqual({ kind: 'bot', id: 'bot_dango' });
+  const resized = await f.call(`/${workbench.window.id}/operations`, 'POST', f.mutation('resize', 0, { type: 'view.resize', viewId: 'main', width: 500 }));
+  expect(resized.body.result).toMatchObject({ status: 'committed' });
+  const restarted = await fixture(f.saved());
+  const after = await read(restarted.call);
+  expect(after.window.views[0]).toMatchObject({ feature: { kind: 'bot', id: 'bot_dango' }, bindingPolicy: 'managed', width: 500 });
+  expect(after.presentation).toEqual({ bots: false });
+});

@@ -1,4 +1,4 @@
-// E21, the goal of a session: the real page, Relay and Controller, with a scripted provider that has a `/goal` command as Claude Code and Codex do.
+// E22, the goal of a session: the real page, Relay and Controller, with a scripted provider that has a `/goal` command as Claude Code and Codex do.
 // The person sets a goal in the composer, the session's CLI checks it, and the pinned line follows each report; Pause, Resume and Clear goal send
 // the adapter's own commands; a reload shows the goal again from what the session reports, and it is gone after Clear goal.
 import type { Browser } from '@playwright/test';
@@ -16,7 +16,7 @@ afterAll(async () => { await browser?.close(); await stack?.close(); });
 
 const goalOf = async () => (await stack.provider.session('welcome')!.runtimeInfo()).goal;
 
-it('E21: a goal set in the composer is pinned above the conversation and follows the CLI\'s checks, Pause, Resume and a reload, until Clear goal', async () => {
+it('E22: a goal set in the composer is pinned above the conversation and follows the CLI\'s checks, Pause, Resume and a reload, until Clear goal', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('welcome'));
   await waitForEntries(page, 2);
   expect(await goalLine(page).count()).toBe(0);
@@ -49,7 +49,7 @@ it('E21: a goal set in the composer is pinned above the conversation and follows
   await context.close();
 }, 120_000);
 
-it('E21: a goal the CLI finishes shows as done with no action', async () => {
+it('E22: a goal the CLI finishes shows as done with no action', async () => {
   const { context, page } = await openPage(browser, stack.sessionUrl('welcome'));
   await waitForEntries(page, 2);
   await send(page, '/goal ship the release');

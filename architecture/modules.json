@@ -141,7 +141,7 @@
         "E1",
         "E2",
         "E3",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "wire-compatibility"
@@ -223,7 +223,7 @@
         "S1"
       ],
       "flows": [
-        "E21"
+        "E22"
       ],
       "invariants": [
         "item-key-stability"
@@ -427,7 +427,8 @@
         "E18",
         "E19",
         "E20",
-        "E21"
+        "E21",
+        "E22"
       ],
       "invariants": [
         "journal-reopen-recovery",
@@ -609,7 +610,7 @@
         "E2",
         "E3",
         "E9",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "replica-absorb-by-key",
@@ -641,7 +642,7 @@
         "E2",
         "E3",
         "E9",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "replica-absorb-by-key"
@@ -671,7 +672,7 @@
       ],
       "flows": [
         "E4",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "item-key-stability"
@@ -689,7 +690,7 @@
       ],
       "flows": [
         "E3",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "item-key-stability"
@@ -811,7 +812,8 @@
         "E18",
         "E19",
         "E20",
-        "E21"
+        "E21",
+        "E22"
       ],
       "invariants": [
         "draft-ownership",
@@ -856,7 +858,7 @@
         "E3",
         "E5",
         "E10",
-        "E21"
+        "E22"
       ],
       "invariants": [
         "recovery-notice"

@@ -100,4 +100,4 @@ export const ChainAction = Type.Union([
 export type ChainAction = Static<typeof ChainAction>;
 export const isChainAction = (value: unknown): value is ChainAction => Value.Check(ChainAction, value);
 /** The audit's view: the account's chains, newest first, the names of their bots, and which standing bots are paused. */
-export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds; routines: Record<string, Routine[]> }
+export interface ChainView { chains: BotChain[]; names: Record<string, string>; paused: string[]; thresholds: ChainThresholds; routines?: Record<string, Routine[]> }

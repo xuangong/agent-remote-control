@@ -12,8 +12,7 @@ import { AskViewScope } from '../kernel/useAskVisibility.js';
 import { ConversationConnectionScope } from '../conversation/conversation-connections.js';
 import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { ToastActivity } from '../kernel/Toast.js';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type { UnattendedView } from '@orchardworks/agent-remote-protocol';
+import { useCallback, useMemo, type ReactNode } from 'react';
 import { bringBackText, taskDirectory } from '../features/tasks/task-directory.js';
 import { sendPersonInput } from '../conversation/fork-actions.js';
 import { RemoteChainClient, RemoteTeamClient } from '@orchardworks/agent-client';
@@ -85,22 +84,14 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
     (card, agentId) => sendPersonInput(transport, agentId, bringBackText(card, t)),
     async (botId, primary) => { await chainClient.act({ action: 'set_primary', botId, primary }); }),
     [tasks, openSession, compactLayout, taskClient, chainClient, updateTaskRoster, baseUrl, windowWorkspace.groups, transport, t]);
-  // The routines of the bots, with the account's time zone and what holds unattended work now; the account's side is read once a minute and after each change.
-  const [unattended, setUnattended] = useState<UnattendedView>();
-  const loadUnattended = useCallback(() => chainClient.list().then(view => setUnattended(view.unattended), () => undefined), [chainClient]);
-  useEffect(() => { void loadUnattended(); const timer = setInterval(() => { if (document.visibilityState === 'visible') void loadUnattended(); }, 60_000); return () => clearInterval(timer); }, [loadUnattended]);
+  // The routines of the bots come with the roster; the account's side (time zone, pause, budget) is read when a bot's details are open.
   const routineDirectory = useMemo(() => ({ ...tasksDirectory,
-    routinesOf: (botId: string) => {
-      const routines = tasks?.find(team => team.inbox?.botId === botId && team.status === 'active')?.inbox?.routines;
-      if (!routines) return undefined;
-      const hold = unattended?.settings.paused ? 'paused' : unattended?.absent ? 'absence' : unattended?.tripped.some(item => item.scope === 'account' || item.scope === botId) ? 'budget' : undefined;
-      return { routines, zone: unattended?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, ...(hold ? { hold } : {}) };
-    },
+    routinesOf: (botId: string) => tasks?.find(team => team.inbox?.botId === botId && team.status === 'active')?.inbox?.routines ?? (tasks?.some(team => team.inbox?.botId === botId) ? [] : undefined),
+    unattendedOf: () => chainClient.list().then(view => view.unattended),
     routineAct: async (action: Parameters<NonNullable<TaskDirectory['routineAct']>>[0]) => {
       await chainClient.act(action);
       updateTaskRoster(baseUrl, (await taskClient.list()).filter(team => !!team.task || !!team.inbox || !!team.ask));
-      void loadUnattended();
-    } }), [tasksDirectory, tasks, unattended, chainClient, taskClient, updateTaskRoster, baseUrl, loadUnattended]);
+    } }), [tasksDirectory, tasks, chainClient, taskClient, updateTaskRoster, baseUrl]);
   return <TaskDirectoryContext.Provider value={routineDirectory}><AssistantNamesContext.Provider value={assistantNames}><BotWorkbenchProvider scope={scope}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
      title names the assistant on screen, or Window mode's own title. */}
   <DesktopFrame surface={pageShown ? 'page' : windowMode ? 'window' : 'bot'} phone={phone}

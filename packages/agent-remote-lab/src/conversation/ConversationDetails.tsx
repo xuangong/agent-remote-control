@@ -1,6 +1,7 @@
 // The assistant's details for a conversation: what its place and its presentation know, with this conversation's process
 // mode, settings and files. They open in the host's panel, as a sheet on a phone, or in a tile's own panel.
-import { lazy, Suspense, useContext, useEffect, useMemo, type ReactNode } from 'react';
+import { lazy, Suspense, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type { UnattendedView } from '@orchardworks/agent-remote-protocol';
 import { createPortal } from 'react-dom';
 import { sessionFiles, timelineEntryKey, type AgentReplicaState, type RemoteSessionState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { FilePreviewContext, useTaskDirectory, useTranslate, type AgentChildSessionView } from '@orchardworks/agent-client-web/react';
@@ -41,8 +42,10 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     board: boardOf, name: id => directory.botName?.(id) ?? id, choices: directory.assignees?.(botId) ?? [],
     staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
     ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
-  const routinesState = detailsShown && botId ? directory?.routinesOf?.(botId) : undefined;
-  const routines: RoutinesChoice | undefined = routinesState && directory?.routineAct && botId ? { routines: routinesState.routines, zone: routinesState.zone, ...(routinesState.hold ? { hold: routinesState.hold } : {}),
+  const routinesOf = detailsShown && botId ? directory?.routinesOf?.(botId) : undefined;
+  const account = useAccountUnattended(routinesOf ? directory?.unattendedOf : undefined);
+  const hold = account?.settings.paused ? 'paused' : account?.absent ? 'absence' : account?.tripped.some(item => item.scope === 'account' || item.scope === botId) ? 'budget' : undefined;
+  const routines: RoutinesChoice | undefined = routinesOf && directory?.routineAct && botId ? { routines: routinesOf, zone: account?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, ...(hold ? { hold } : {}),
     save: spec => directory.routineAct!({ action: 'routine_set', botId, ...spec }), pause: (name, paused) => directory.routineAct!({ action: 'routine_pause', botId, name, paused }),
     remove: name => directory.routineAct!({ action: 'routine_delete', botId, name }), test: name => directory.routineAct!({ action: 'routine_test', botId, name }) } : undefined;
   useWatchTeamRoster(!!board);
@@ -77,4 +80,18 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   } : undefined;
   const panel = assistantRef && host ? <Suspense fallback={null}><AssistantDetails assistant={assistantRef} surface={host.surface} onClose={() => host.setOpen(false)} /></Suspense> : null;
   return panel && host?.surface === 'panel' && host.slot ? createPortal(panel, host.slot) : panel;
+}
+
+/** The account's unattended work while a bot's routines are on screen: read when they open and once a minute after, while the page is visible. */
+function useAccountUnattended(load: (() => Promise<UnattendedView | undefined>) | undefined): UnattendedView | undefined {
+  const [view, setView] = useState<UnattendedView>();
+  useEffect(() => {
+    if (!load) return;
+    let live = true;
+    const read = () => { void load().then(next => { if (live) setView(next); }, () => undefined); };
+    read();
+    const timer = setInterval(() => { if (document.visibilityState === 'visible') read(); }, 60_000);
+    return () => { live = false; clearInterval(timer); };
+  }, [load]);
+  return view;
 }

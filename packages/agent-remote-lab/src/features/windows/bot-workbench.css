@@ -4,3 +4,47 @@
 .lab-workbench-kind > p { margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
 .lab-workbench-choices { display: grid; gap: var(--orchard-space-xs); margin: 0; padding: 0; list-style: none; }
 .lab-workbench-choices button { width: 100%; justify-content: flex-start; }
+
+/* A derived tile: a state bar above the session's own conversation. */
+.lab-derived-tile { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
+.lab-derived-tile-bar { display: flex; align-items: center; gap: var(--orchard-space-s); flex: none; padding: var(--orchard-space-xs) var(--orchard-space-m); background: var(--orchard-fill); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-derived-tile-state { font-weight: 600; color: var(--orchard-text-strong); }
+.lab-derived-tile-note { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-derived-tile-bar button { margin-left: auto; }
+.lab-derived-tile > :not(.lab-derived-tile-bar) { flex: 1; min-height: 0; }
+
+/* The bot workbench around its rail: a header above, the ledger beside. */
+.lab-workbench-body { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.lab-workbench-main { display: flex; flex: 1; min-width: 0; min-height: 0; }
+.lab-workbench-main > .lab-session-dock-rail { flex: 1; min-width: 0; }
+.lab-workbench-header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--orchard-space-s) var(--orchard-space-l); flex: none; padding: var(--orchard-space-xs) var(--orchard-space-l); border-bottom: 1px solid var(--orchard-fill-strong); color: var(--orchard-text); font-size: var(--orchard-type-footnote-size); }
+.lab-workbench-header-name { margin: 0; font: var(--orchard-type-footnote-weight) var(--orchard-type-title-size) / 1.2 var(--orchard-font-text); color: var(--orchard-text-strong); }
+.lab-workbench-header button { min-height: 28px; padding: 0 var(--orchard-space-m); border: 0; border-radius: var(--orchard-radius-pill); background: var(--orchard-surface); color: var(--orchard-text-strong); font: inherit; cursor: pointer; }
+.lab-workbench-header button[aria-pressed="true"] { background: var(--orchard-fill-strong); }
+.lab-workbench-header [data-attention] { background: var(--orchard-fill-strong); font-weight: 600; }
+.lab-workbench-chips { display: flex; flex-wrap: wrap; align-items: center; gap: var(--orchard-space-xs); margin: 0; padding: 0; list-style: none; }
+.lab-workbench-header-actions { display: flex; gap: var(--orchard-space-xs); margin-left: auto; }
+.lab-workbench-ledger { box-sizing: border-box; flex: none; width: 340px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--orchard-space-m) var(--orchard-space-l); border-left: 1px solid var(--orchard-fill-strong); }
+.lab-workbench-ledger > h2 { margin: 0 0 var(--orchard-space-s); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); color: var(--orchard-text-secondary); }
+
+/* The Answers and Ended folds: rows that open one tile at a time. */
+.lab-workbench-group { display: grid; align-content: start; gap: var(--orchard-space-2xs); margin: 0; padding: var(--orchard-space-m); list-style: none; overflow-y: auto; }
+.lab-workbench-group button { display: grid; width: 100%; padding: var(--orchard-space-s) var(--orchard-space-m); border: 0; border-radius: var(--orchard-radius-row); background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.lab-workbench-group button:hover { background: var(--orchard-fill); }
+.lab-workbench-group small { color: var(--orchard-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A bot workbench on a phone: its work as a list, with a back bar above a pushed conversation. */
+.lab-workbench-overview { display: grid; align-content: start; gap: var(--orchard-space-l); flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: var(--orchard-space-l); padding-bottom: max(var(--orchard-space-l), env(safe-area-inset-bottom)); color: var(--orchard-text); }
+.lab-workbench-overview > header { display: flex; align-items: center; justify-content: space-between; gap: var(--orchard-space-m); }
+.lab-workbench-overview h2 { margin: 0; font: var(--orchard-type-footnote-weight) var(--orchard-type-title-size) / 1.2 var(--orchard-font-text); color: var(--orchard-text-strong); }
+.lab-workbench-overview h3 { margin: 0 0 var(--orchard-space-xs); font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); color: var(--orchard-text-secondary); }
+.lab-workbench-overview h3 > button { padding: 0; background: transparent; color: inherit; font: inherit; }
+.lab-workbench-overview ul { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; }
+.lab-workbench-overview li > button { display: grid; width: 100%; min-height: 44px; padding: var(--orchard-space-s) var(--orchard-space-m); border: 0; border-radius: var(--orchard-radius-row); background: var(--orchard-fill); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.lab-workbench-overview li > button[data-state="needs_input"] { box-shadow: inset 3px 0 0 var(--orchard-text-strong); }
+.lab-workbench-overview small { color: var(--orchard-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lab-workbench-overview button { cursor: pointer; font: inherit; }
+.lab-workbench-phone { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; }
+.lab-workbench-back { display: flex; align-items: center; flex: none; min-height: 44px; padding: 0 var(--orchard-space-l); border: 0; border-bottom: 1px solid var(--orchard-fill-strong); background: transparent; color: var(--orchard-text-strong); font: inherit; text-align: left; cursor: pointer; }
+@media (prefers-reduced-motion: no-preference) { .lab-workbench-phone[data-pushed] { animation: lab-workbench-push var(--orchard-duration-pop, 240ms) var(--orchard-ease-standard, ease-out) both; } }
+@keyframes lab-workbench-push { from { transform: translateX(32%); opacity: 0.4; } to { transform: none; opacity: 1; } }

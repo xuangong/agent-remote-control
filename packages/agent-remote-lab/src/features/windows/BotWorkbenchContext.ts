@@ -9,6 +9,8 @@ export interface BotWorkbenchActions {
   boundTo(window: Pick<WorkspaceWindow, 'views'>): { readonly botId: string; readonly name: string } | undefined;
   /** Opens the bot's workbench in Window mode: the one this device used last, or a new one. */
   openWorkbench(botId: string): Promise<void>;
+  /** Opens the bot's conversation in Bot mode. */
+  openChat(botId: string): Promise<void>;
   /** Asks for the new-workbench choice, the bind choice or the unbind confirmation. */
   request(sheet: 'new' | 'bind' | 'unbind'): void;
 }

@@ -25,23 +25,18 @@ import { IconButton } from '../../ui/IconButton.js';
 import { viewKey } from '../helpers.js';
 import type { AppScope } from '../types.js';
 import { usePhoneLayout } from '../../kernel/usePhoneLayout.js';
+import { useBotWorkbench } from '../useBotWorkbench.js';
+import { derivedWorkbenchPanes } from './derivedWorkbenchTiles.js';
+import { BotWorkbenchBody } from './BotWorkbenchBody.js';
+import { WorkbenchPhone } from './WorkbenchPhone.js';
 
-export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'activeView' | 'ancestors' | 'asleepBot' | 'attachingAgentId' | 'availableConversationActions' | 'baseUrl' | 'botHandoff' | 'boundFork' | 'canHandoffPrimary' | 'closeSide' | 'closeView' | 'compactLayout' | 'compositionProtected' | 'conversationActions' | 'conversationHistory' | 'createFork' | 'createSessionView' | 'currentSession' | 'detachedSideRoot' | 'directory' | 'draftBindingFor' | 'draftOwnerBinding' | 'executePrimaryCommand' | 'expandedKeys' | 'favorites' | 'focusPrimaryContent' | 'focusSession' | 'focusedWindow' | 'foldedBot' | 'forkInputStatus' | 'forkStore' | 'handoff' | 'hostOffline' | 'inspectTimelineEntry' | 'letterReveals' | 'markSessionMissing' | 'messageDrafts' | 'missingSessions' | 'navigationIntent' | 'observeSideActivity' | 'openFork' | 'openLocalView' | 'openNewSessionPanel' | 'openSession' | 'openSideKeys' | 'openingControlNotice' | 'presentSessionView' | 'presentedPrimaryViewId' | 'presentedViewId' | 'primaryCommunication' | 'primaryDisplaySlot' | 'primaryExpanded' | 'primaryGroups' | 'primaryNavigation' | 'primarySuccessionGated' | 'questionDrafts' | 'receiveViewSession' | 'refreshRelations' | 'remoteHosts' | 'renamePrimaryTitle' | 'replicaFor' | 'reportPendingPrimaryInput' | 'restoreView' | 'revealSession' | 'selectPrimaryGroup' | 'selectedHost' | 'sessionEntries' | 'sessionState' | 'sessionWindows' | 'setMinimizedViewTarget' | 'setQuestionDrafts' | 'setRemovingBot' | 'setSessionViewTarget' | 'shareSession' | 'sharedSlots' | 'sharedWindow' | 'showWindowSessionChooser' | 'sideSessions' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'succession' | 'successionContext' | 'successionProgress' | 'supportingRailOpen' | 'traceRequest' | 'transitioning' | 'transport' | 'unlinkSide' | 'viewNavigation' | 'wakeBot' | 'windowMode' | 'windowSession' | 'windowStageVisible' | 'windowWorkspace'> }) {
+export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'accessReady' | 'activeAgentId' | 'activeOpened' | 'activeView' | 'ancestors' | 'asleepBot' | 'attachingAgentId' | 'availableConversationActions' | 'baseUrl' | 'botHandoff' | 'boundFork' | 'canHandoffPrimary' | 'closeSide' | 'closeView' | 'compactLayout' | 'compositionProtected' | 'conversationActions' | 'conversationHistory' | 'createFork' | 'createSessionView' | 'currentSession' | 'detachedSideRoot' | 'directory' | 'draftBindingFor' | 'draftOwnerBinding' | 'executePrimaryCommand' | 'expandedKeys' | 'favorites' | 'focusPrimaryContent' | 'focusSession' | 'focusedWindow' | 'foldedBot' | 'forkInputStatus' | 'forkStore' | 'handoff' | 'hostOffline' | 'inspectTimelineEntry' | 'letterReveals' | 'markSessionMissing' | 'messageDrafts' | 'missingSessions' | 'navigationIntent' | 'observeSideActivity' | 'openFork' | 'openLocalView' | 'openNewSessionPanel' | 'openSession' | 'openSideKeys' | 'openingControlNotice' | 'presentSessionView' | 'presentedPrimaryViewId' | 'presentedViewId' | 'primaryCommunication' | 'primaryDisplaySlot' | 'primaryExpanded' | 'primaryGroups' | 'primaryNavigation' | 'primarySuccessionGated' | 'questionDrafts' | 'receiveViewSession' | 'refreshRelations' | 'remoteHosts' | 'renamePrimaryTitle' | 'replicaFor' | 'reportPendingPrimaryInput' | 'restoreView' | 'revealSession' | 'selectPrimaryGroup' | 'selectedHost' | 'sessionEntries' | 'sessionState' | 'sessionWindows' | 'setMinimizedViewTarget' | 'setQuestionDrafts' | 'setRemovingBot' | 'setSessionViewTarget' | 'shareSession' | 'sharedSlots' | 'sharedWindow' | 'showWindowSessionChooser' | 'sideSessions' | 'stackPath' | 'stackRange' | 'stackRoot' | 'state' | 'status' | 'succession' | 'successionContext' | 'successionProgress' | 'supportingRailOpen' | 'traceRequest' | 'transitioning' | 'transport' | 'unlinkSide' | 'viewNavigation' | 'wakeBot' | 'windowMode' | 'windowSession' | 'windowStageVisible' | 'windowWorkspace' | 'teamRoster'> }) {
   const { accessReady, activeAgentId, activeOpened, activeView, ancestors, asleepBot, attachingAgentId, availableConversationActions, baseUrl, botHandoff, boundFork, canHandoffPrimary, closeSide, closeView, compactLayout, compositionProtected, conversationActions, conversationHistory, createFork, createSessionView, currentSession, detachedSideRoot, directory, draftBindingFor, draftOwnerBinding, executePrimaryCommand, expandedKeys, favorites, focusPrimaryContent, focusSession, focusedWindow, foldedBot, forkInputStatus, forkStore, handoff, hostOffline, inspectTimelineEntry, letterReveals, markSessionMissing, messageDrafts, missingSessions, navigationIntent, observeSideActivity, openFork, openLocalView, openNewSessionPanel, openSession, openSideKeys, openingControlNotice, presentSessionView, presentedPrimaryViewId, presentedViewId, primaryCommunication, primaryDisplaySlot, primaryExpanded, primaryGroups, primaryNavigation, primarySuccessionGated, questionDrafts, receiveViewSession, refreshRelations, remoteHosts, renamePrimaryTitle, replicaFor, reportPendingPrimaryInput, restoreView, revealSession, selectPrimaryGroup, selectedHost, sessionEntries, sessionState, sessionWindows, setMinimizedViewTarget, setQuestionDrafts, setRemovingBot, setSessionViewTarget, shareSession, sharedSlots, sharedWindow, showWindowSessionChooser, sideSessions, stackPath, stackRange, stackRoot, state, status, succession, successionContext, successionProgress, supportingRailOpen, traceRequest, transitioning, transport, unlinkSide, viewNavigation, wakeBot, windowMode, windowSession, windowStageVisible, windowWorkspace } = scope;
   const phone = usePhoneLayout();
   const t = useTranslate();
-  return <>
-        {sharedWindow ? <SessionDockRail compact={compactLayout} stack={phone} onCreateView={createSessionView}
-          onSelectPrimaryGroup={selectPrimaryGroup}
-          onResizePrimaryGroup={(viewId, width) => windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width })}
-          onCollapsePrimaryGroup={(viewId, collapsed) => {
-            const view = sharedWindow.views.find(item => item.id === viewId);
-            if (!collapsed && view && asleepBot(view)) wakeBot(sharedWindow.id, viewId);
-            if (collapsed || view?.collapsed) windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed });
-          }}
-          onClosePrimaryGroup={viewId => windowWorkspace.authority?.operate({ type: 'view.close', viewId })}
-          onRemovePrimaryGroup={viewId => setRemovingBot({ windowId: sharedWindow.id, viewId })}
-          primaryGroups={primaryGroups.map(view => {
+  const workbench = useBotWorkbench(scope);
+  const derived = workbench.bound ? derivedWorkbenchPanes(workbench, scope, t) : [];
+  const storedPanes = sharedWindow ? primaryGroups.map(view => {
             const pendingSlot = view.id === sharedWindow.selectedPrimaryViewId ? succession.displaySlot : undefined;
             const slot = sharedSlots?.get(view.id) ?? (pendingSlot && view.binding
               && [compositionSelection(pendingSlot), { hostId: pendingSlot.origin.target.hostId, ...pendingSlot.origin.target.native }]
@@ -50,7 +45,7 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
             const missing = !!view.binding && missingSessions.has(sessionKey(view.binding));
             return { id: view.id, title: view.binding && !missing ? view.binding.title : t('windows.selectSession'), width: view.width, additionalWidth,
               // A sleeping bot stands folded and dimmed; restoring it wakes it for every device.
-              selected: view.id === presentedPrimaryViewId, collapsed: view.collapsed || asleepBot(view),
+              selected: view.id === presentedPrimaryViewId && !workbench.selected, collapsed: view.collapsed || asleepBot(view),
               // A folded bot shows who it is and how it is doing, from the shared channel, while its conversation is released.
               ...((view.collapsed || asleepBot(view)) && !missing && isBotView(view) ? { fold: foldedBot(view) } : {}),
               content: view.binding && !missing ? <>{compactLayout && asleepBot(view) ? <AsleepNotice onWake={() => restoreView(view.id)} /> : null}<SessionFamily baseUrl={baseUrl} storageScope={baseUrl} target={view.binding} viewId={view.id} folded={asleepBot(view)} onCloseView={closeView}
@@ -81,7 +76,22 @@ export function SessionDocks({ scope }: { readonly scope: Pick<AppScope, 'access
                       <button type="button" onClick={() => { selectPrimaryGroup(view.id); openNewSessionPanel(); }}>{t('windows.newSession')}</button>
                     </div></div></div>,
             };
-          })} /> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
+          }) : [];
+  const phoneWorkbench = phone && workbench.bound;
+  return <>
+        {sharedWindow && phoneWorkbench ? <WorkbenchPhone workbench={workbench} panes={[...storedPanes, ...derived]} openStored={selectPrimaryGroup} />
+        : sharedWindow ? <BotWorkbenchBody workbench={workbench}><SessionDockRail compact={compactLayout} stack={phone} onCreateView={createSessionView}
+          onSelectPrimaryGroup={id => workbench.owns(id) ? workbench.select(id) : (workbench.clearSelection(), selectPrimaryGroup(id))}
+          onResizePrimaryGroup={(viewId, width) => { if (!workbench.owns(viewId)) windowWorkspace.authority?.operate({ type: 'view.resize', viewId, width }); }}
+          onCollapsePrimaryGroup={(viewId, collapsed) => {
+            if (workbench.owns(viewId)) { workbench.setFolded(viewId, collapsed); return; }
+            const view = sharedWindow.views.find(item => item.id === viewId);
+            if (!collapsed && view && asleepBot(view)) wakeBot(sharedWindow.id, viewId);
+            if (collapsed || view?.collapsed) windowWorkspace.authority?.operate({ type: 'view.collapse', viewId, collapsed });
+          }}
+          onClosePrimaryGroup={viewId => windowWorkspace.authority?.operate({ type: 'view.close', viewId })}
+          onRemovePrimaryGroup={viewId => setRemovingBot({ windowId: sharedWindow.id, viewId })}
+          primaryGroups={[...storedPanes, ...derived]} /></BotWorkbenchBody> : <SessionDockRail onCreateView={createSessionView} minimizedHeader={<div ref={setMinimizedViewTarget} data-pane-selection-ignore className="lab-global-view-slot lab-minimized-view-slot" />} mainTitle={stackRoot?.title ?? activeOpened?.title} minimumBaseWidth={stackRange.end > stackRange.start ? 640 : 320}><ConversationSplit compact={compactLayout} start={stackRange.start} end={stackRange.end}>
         <CollapsedConversations entries={sessionEntries} sessions={stackPath.slice(0, stackRange.start)} offset={0} onExpand={revealSession} />
         <ConversationPane className="lab-primary-conversation lab-session-composition" data-active={!sessionWindows.activeId || undefined} tabIndex={-1} hidden={!primaryExpanded} onFocusCapture={event => focusPrimaryContent(event.target)} onClickCapture={event => focusPrimaryContent(event.target)}>
         {windowSession.empty ? <div className="lab-empty-session-view" role="status"><p>{t('windows.emptyView')}</p><button type="button" onClick={openNewSessionPanel}>{t('windows.newSession')}</button>{botHandoff ? null : successionProgress}</div> : <><CommunicationNavigationContext.Provider value={primaryCommunication}><LabWorkbench {...primaryNavigation}

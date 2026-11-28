@@ -27,6 +27,8 @@ export interface WorkbenchTile {
   readonly folded: boolean;
   readonly state?: WorkbenchState;
   readonly ended?: boolean;
+  /** The person reads it and cannot write to it: an ended sub-session, or an answer session. */
+  readonly readOnly?: boolean;
   readonly mark?: 'you';
   readonly currentStep?: string;
   readonly lastWork?: string;
@@ -34,7 +36,8 @@ export interface WorkbenchTile {
   readonly locator?: WorkbenchLocator;
   readonly view?: WindowView;
 }
-export interface AnswerSessionRow { readonly teamId: string; readonly conversation: string; readonly lastAt: number; readonly count: number }
+export interface AnswerSessionRow { readonly teamId: string; readonly conversation: string; readonly lastAt: number; readonly count: number; readonly locator?: WorkbenchLocator }
+export const answerTileId = (teamId: string) => `answer:${teamId}`;
 export interface WorkbenchInput {
   readonly window: WorkspaceWindow;
   readonly botId: string | undefined;
@@ -53,6 +56,8 @@ export interface WorkbenchModel {
   readonly main: WorkbenchTile | undefined;
   readonly stored: readonly WorkbenchTile[];
   readonly derived: readonly WorkbenchTile[];
+  /** Answer sessions the person opened, read only, after the derived tiles. */
+  readonly answerTiles: readonly WorkbenchTile[];
   readonly ended: readonly WorkbenchTile[];
   readonly answers: readonly AnswerSessionRow[];
   readonly loaded: boolean;
@@ -73,7 +78,7 @@ const needRank: Record<WorkbenchState, number> = { needs_input: 0, working: 1, q
 function tileOf(task: TaskView, input: WorkbenchInput, folded = !input.expanded.has(derivedTileId(task.taskId))): WorkbenchTile {
   const worker = task.worker.nativeSessionId ? { hostId: task.worker.hostId, providerId: task.worker.providerId, nativeSessionId: task.worker.nativeSessionId } : undefined;
   return { id: derivedTileId(task.taskId), source: 'derived', title: task.title, folded, state: task.state, taskId: task.taskId,
-    ...(task.state === 'ended' ? { ended: true } : {}), ...(task.startedBy === 'person' ? { mark: 'you' as const } : {}),
+    ...(task.state === 'ended' ? { ended: true, readOnly: true } : {}), ...(task.startedBy === 'person' ? { mark: 'you' as const } : {}),
     ...(task.currentStep ? { currentStep: task.currentStep } : {}), ...(task.lastWork ? { lastWork: task.lastWork.title } : {}), ...(worker ? { locator: worker } : {}) };
 }
 
@@ -83,6 +88,11 @@ function holdSlots(natural: WorkbenchTile[], held: ReadonlySet<string>, previous
   const result = natural.filter(tile => !kept.includes(tile.id));
   for (const id of kept) result.splice(Math.min(previous.indexOf(id), result.length), 0, natural.find(tile => tile.id === id)!);
   return result;
+}
+
+function answerTiles(answers: readonly AnswerSessionRow[], expanded: ReadonlySet<string>): WorkbenchTile[] {
+  return [...answers].sort((a, b) => b.lastAt - a.lastAt).filter(row => row.locator && expanded.has(answerTileId(row.teamId)))
+    .map(row => ({ id: answerTileId(row.teamId), source: 'derived' as const, title: row.conversation, folded: false, readOnly: true, locator: row.locator }));
 }
 
 export function projectBotWorkbench(input: WorkbenchInput): WorkbenchModel {
@@ -95,7 +105,7 @@ export function projectBotWorkbench(input: WorkbenchInput): WorkbenchModel {
   const main: WorkbenchTile | undefined = mainView && { id: mainView.id, source: 'main', title: mainView.binding?.title ?? '', folded: mainView.collapsed, view: mainView,
     ...(input.mainSession ? { locator: input.mainSession } : {}) };
   if (!botId || !input.mainSession || !tasks) {
-    return { botId, main, stored, derived: [], ended: [], answers: [...input.answers].sort((a, b) => b.lastAt - a.lastAt), loaded: !!tasks, botSubSessions: 0, attention: { needsYou: 0, working: 0 } };
+    return { botId, main, stored, derived: [], answerTiles: [], ended: [], answers: [...input.answers].sort((a, b) => b.lastAt - a.lastAt), loaded: !!tasks, botSubSessions: 0, attention: { needsYou: 0, working: 0 } };
   }
   const mainKey = identity(input.mainSession);
   const botOwned = tasks.filter(task => task.startedBy !== 'person' && identity(task.owner) === mainKey);
@@ -115,6 +125,6 @@ export function projectBotWorkbench(input: WorkbenchInput): WorkbenchModel {
   const derived = holdSlots([...live, ...heldEnded.map(task => tileOf(task, input))], heldSet, input.previous);
   const ended = endedTasks.filter(task => !heldSet.has(derivedTileId(task.taskId))).slice(0, ENDED_SHOWN).map(task => tileOf(task, input));
   const count = (state: WorkbenchState) => mine.filter(task => task.state === state || state === 'working' && task.state === 'queued').length;
-  return { botId, main, stored: decorated, derived, ended, answers: [...input.answers].sort((a, b) => b.lastAt - a.lastAt), loaded: true,
+  return { botId, main, stored: decorated, derived, answerTiles: answerTiles(input.answers, input.expanded), ended, answers: [...input.answers].sort((a, b) => b.lastAt - a.lastAt), loaded: true,
     botSubSessions: botOwned.filter(task => task.state !== 'ended').length, attention: { needsYou: count('needs_input'), working: count('working') } };
 }

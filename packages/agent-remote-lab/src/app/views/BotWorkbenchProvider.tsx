@@ -6,13 +6,14 @@ import { standingBots } from '../../features/windows/bot-workbench-binding.js';
 import { workbenchBotId } from '../../features/windows/bot-workbench.js';
 import type { AppScope } from '../types.js';
 
-export function BotWorkbenchProvider({ scope, children }: { readonly scope: Pick<AppScope, 'assistantNames' | 'bindWorkbenchToBot' | 'createFreeWindow' | 'openWorkbench' | 'setWorkbenchSheet' | 'unbindWorkbenchFromBot' | 'windowWorkspace' | 'workbenchSheet'>; readonly children: ReactNode }) {
-  const { assistantNames, bindWorkbenchToBot, createFreeWindow, openWorkbench, setWorkbenchSheet, unbindWorkbenchFromBot, windowWorkspace, workbenchSheet } = scope;
+export function BotWorkbenchProvider({ scope, children }: { readonly scope: Pick<AppScope, 'assistantNames' | 'bindWorkbenchToBot' | 'createFreeWindow' | 'openInBotMode' | 'openWorkbench' | 'setWorkbenchSheet' | 'unbindWorkbenchFromBot' | 'windowWorkspace' | 'workbenchSheet'>; readonly children: ReactNode }) {
+  const { assistantNames, bindWorkbenchToBot, openInBotMode, createFreeWindow, openWorkbench, setWorkbenchSheet, unbindWorkbenchFromBot, windowWorkspace, workbenchSheet } = scope;
   const [busy, setBusy] = useState(false);
   const groups = windowWorkspace.groups;
   const bots = useMemo(() => standingBots(groups).map(bot => ({ botId: bot.botId, name: assistantNames.view(bot.groupId, bot.viewId) })), [groups, assistantNames]);
   const actions = useMemo<BotWorkbenchActions>(() => ({ bots, request: setWorkbenchSheet, openWorkbench,
-    boundTo: window => { const botId = workbenchBotId(window); const bot = botId ? bots.find(item => item.botId === botId) : undefined; return botId ? { botId, name: bot?.name ?? botId } : undefined; } }), [bots, setWorkbenchSheet, openWorkbench]);
+    openChat: async botId => { const bot = standingBots(groups).find(item => item.botId === botId); if (bot) await openInBotMode(bot.groupId, bot.viewId); },
+    boundTo: window => { const botId = workbenchBotId(window); const bot = botId ? bots.find(item => item.botId === botId) : undefined; return botId ? { botId, name: bot?.name ?? botId } : undefined; } }), [bots, groups, setWorkbenchSheet, openWorkbench, openInBotMode]);
   const open = windowWorkspace.readWindow();
   const run = async (action: () => void | Promise<void>) => { setBusy(true); try { await action(); } finally { setBusy(false); setWorkbenchSheet(undefined); } };
   return <BotWorkbenchContext.Provider value={actions}>{children}

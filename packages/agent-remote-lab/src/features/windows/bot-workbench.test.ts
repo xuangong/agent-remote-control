@@ -119,3 +119,16 @@ describe('the shared contract fixture', () => {
     expect(model.stored.map(tile => [tile.id, tile.folded])).toEqual([['note', true]]);
   });
 });
+
+describe('answer sessions as tiles', () => {
+  const rows = [{ teamId: 't1', conversation: 'Release room', lastAt: 1, count: 1, locator: { hostId: 'local', providerId: 'claude', nativeSessionId: 'a1' } },
+    { teamId: 't2', conversation: 'No session yet', lastAt: 2, count: 1 }];
+  it('opens an answer session as a read only tile only when the person opened it', () => {
+    expect(projectBotWorkbench(input({ answers: rows })).answerTiles).toEqual([]);
+    const opened = projectBotWorkbench(input({ answers: rows, expanded: new Set(['answer:t1', 'answer:t2']) })).answerTiles;
+    expect(opened.map(tile => [tile.id, tile.readOnly, tile.title])).toEqual([['answer:t1', true, 'Release room']]);
+  });
+  it('marks an ended sub-session read only', () => {
+    expect(projectBotWorkbench(input({ tasks: [sub('e', 'ended', 1)] })).ended[0]!.readOnly).toBe(true);
+  });
+});

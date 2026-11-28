@@ -9,6 +9,8 @@ import { windowBindingKey } from '../kernel/window-composition.js';
 import { windowCatalog } from '../features/windows/useWindowActions.js';
 import { bindWorkbench, resolveWorkbench, standingBots, unbindWorkbench } from '../features/windows/bot-workbench-binding.js';
 import { byRecentUse } from '../features/windows/window-recency.js';
+import { workbenchFromTeams } from '../features/windows/bot-workbench-teams.js';
+import { readExpanded } from '../features/windows/workbench-expansion.js';
 import { attributionWindowOperation } from '../features/sessions/session-attribution-navigation.js';
 import type { SessionAttribution } from '@orchardworks/agent-client';
 import { useRef } from 'react';
@@ -203,7 +205,11 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
   async function unbindWorkbenchFromBot(): Promise<void> {
     const open = windowWorkspace.readWindow();
     if (!open) return;
-    try { await windowWorkspace.operate({ type: 'layout.apply', layout: unbindWorkbench(open, []) }); }
+    // What the person had open stays: the expanded derived tiles become ordinary tiles; folded groups are not written.
+    const expanded = readExpanded(baseUrl, open.id), teams = teamRoster?.baseUrl === baseUrl ? teamRoster.tasks : undefined;
+    const model = workbenchFromTeams(open, teams, { expanded, held: [], previous: [] });
+    const kept = [...model.derived, ...model.ended].filter(tile => expanded.has(tile.id));
+    try { await windowWorkspace.operate({ type: 'layout.apply', layout: unbindWorkbench(open, kept) }); }
     catch (error) { windowActions.setNotice(errorWords(error, t, 'windows.workbench.notice.notChanged')); }
   }
 

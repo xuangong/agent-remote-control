@@ -25,6 +25,16 @@ describe('BrokerState loading', () => {
     expect([...state.completedCreations.keys()]).toEqual(['k1']);
   });
 
+  it('drops the quiet timers an earlier Relay saved on a bot\'s inbox, and reads the chains they began as routines\'', () => {
+    const bot = 'b_' + '1'.repeat(32), seat = { id: 'seat', hostId: 'h', providerId: 'claude', nativeSessionId: 'n', role: 'requester', name: 'Bot', responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 };
+    const team = { id: 'inbox', operationId: 'inbox', revision: 1, title: 'Bot inbox', status: 'active', createdAt: 1, updatedAt: 1, source: { hostId: 'h', providerId: 'claude', nativeSessionId: 'n', title: 'Bot' },
+      messages: [], members: [seat], inbox: { botId: bot, timers: [{ name: 'Check in', intervalMs: 600_000, dueAt: 5 }] } };
+    const chain = { id: 'c_' + '0'.repeat(16), cause: 'timer', bot, bots: [bot], messages: 1, turns: 0, created: 0, depth: 0, usage: { tokens: 0 }, startedAt: 1, updatedAt: 1 };
+    const state = stateWith({ initialState: saved({ teams: [team as never], chains: [chain as never] }) });
+    expect(state.teams[0]!.inbox).toEqual({ botId: bot });
+    expect(state.chains).toEqual([expect.objectContaining({ cause: 'routine' })]);
+  });
+
   it('refuses saved Teams that are not valid', () => {
     expect(() => stateWith({ initialState: saved({ teams: [{ id: 'not a team' } as never] }) })).toThrow('Invalid saved Teams.');
   });

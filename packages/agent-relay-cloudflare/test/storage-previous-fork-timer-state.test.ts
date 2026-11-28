@@ -13,7 +13,7 @@ const chief = 'b_' + '1'.repeat(32), temporary = 'b_' + '9'.repeat(32);
  * What the Worker before timer ends and forked sub-sessions stored: a bot's inbox with a timer that has no end, and a sub-session whose
  * task has no `forkedFrom`.
  */
-function previousState() {
+function previousState(extra: Record<string, unknown> = {}) {
   const state: any = structuredClone(buildCompleteRelayState(auth));
   const broker = state.tenants[0].broker;
   const member = (id: string, role: string, native: string) => ({ id, hostId: 'mapped-host', providerId: 'fixture', nativeSessionId: native, role, name: id, responsibility: '', creation: 'ready', activity: 'idle', summary: '', updatedAt: 1 });
@@ -25,13 +25,14 @@ function previousState() {
       members: [member('sub-w', 'leader', 'sub-session'), member('sub-o', 'requester', 'chief-session')], task: { title: 'sub', brief: 'Do it.', state: 'working', createdAt: 1, updatedAt: 1 } },
   ];
   state.bots = [{ subject: 'owner', botId: chief, chief: { kind: 'person' }, createdAt: 1, updatedAt: 1 }];
+  Object.assign(state.tenants[0].broker, extra);
   return state;
 }
 
-function storePreviousState() {
+function storePreviousState(extra: Record<string, unknown> = {}) {
   const { db, storage } = sqliteStorage();
   new SqliteRelayStore(storage, auth);
-  const snapshot = encodeValidatedHostedSnapshot(previousState(), SQL_SNAPSHOT_FORMAT);
+  const snapshot = encodeValidatedHostedSnapshot(previousState(extra), SQL_SNAPSHOT_FORMAT);
   for (const { manifest, chunks } of snapshot.records.values()) {
     db.prepare('INSERT INTO relay_snapshot_manifests (kind, identity, format, byte_length, chunk_count, digest) VALUES (?, ?, ?, ?, ?, ?)').run(manifest.kind, manifest.identity, manifest.format, manifest.byte_length, manifest.chunk_count, manifest.digest);
     for (const chunk of chunks) db.prepare('INSERT INTO relay_snapshot_chunks (kind, identity, ordinal, bytes) VALUES (?, ?, ?, ?)').run(chunk.kind, chunk.identity, chunk.ordinal, chunk.bytes);
@@ -40,14 +41,24 @@ function storePreviousState() {
   return { db, storage };
 }
 
-test('loads the state the Worker stored before timer ends and forked sub-sessions: the timer runs without an end, the sub-session without a fork, and it commits again', async () => {
+test('loads the state the Worker stored before routines: the retired quiet timer is dropped without breaking the inbox, the sub-session has no fork, and it commits again', async () => {
   const { storage } = storePreviousState();
   const store = new SqliteRelayStore(storage, auth);
   const teams = store.initial.tenants[0]!.broker.teams ?? [];
   expect(teams.map(team => team.id)).toEqual(['inbox', 'sub']);
+  // The earlier timer is still valid state to read; the Relay drops it when it builds its broker state.
   expect(teams[0]!.inbox!.timers).toEqual([{ name: 'Check in', intervalMs: 600_000, dueAt: 5 }]);
   expect(teams[1]!.task).not.toHaveProperty('forkedFrom');
   expect(teams.every(team => isTeam(team))).toBe(true);
   await store.commit(store.initial);
   expect(new SqliteRelayStore(storage, auth).initial).toEqual(store.initial);
+});
+
+test('keeps the account\'s unattended settings, usage and provider limits across a reload, and a routine on a bot\'s inbox', async () => {
+  const unattended = { settings: { timeZone: 'Asia/Shanghai', budget: { perDay: 5 } }, ledger: { '2026-11-30': { [chief]: { usd: 1.5, tokens: 100, turns: 2, runs: 1 } } }, limits: { 'mapped-host/claude': { at: 1, resetsAt: 9 } } };
+  const { storage } = storePreviousState({ unattended });
+  const store = new SqliteRelayStore(storage, auth);
+  expect(store.initial.tenants[0]!.broker.unattended).toEqual(unattended);
+  await store.commit(store.initial);
+  expect(new SqliteRelayStore(storage, auth).initial.tenants[0]!.broker.unattended).toEqual(unattended);
 });

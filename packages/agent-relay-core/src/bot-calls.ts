@@ -5,7 +5,7 @@
  * standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { workLogLine, assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { type ChainAction, workLogLine, assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, sessionAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { botLive, ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -13,7 +13,7 @@ import { plain } from './drafts.js';
 import { pruneCoordination } from './coordination-retention.js';
 import type { BotInboxes } from './inboxes.js';
 import type { Rooms } from './rooms.js';
-import type { BotWork } from './bot-work.js';
+import type { BotRoutines, RoutineSpec } from './routines.js';
 import { pageList, type BotPages } from './bot-pages.js';
 import { heldItem, type BotBoard, type ItemEdit, type ItemNotice } from './bot-board.js';
 import { newBotId } from './bot-store.js';
@@ -45,7 +45,7 @@ type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'st
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks, private readonly pages: BotPages, private readonly places?: HostPlaces) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotRoutines, private readonly board: BotBoard, private readonly asks: BotAsks, private readonly pages: BotPages, private readonly places?: HostPlaces) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -333,6 +333,16 @@ export class BotCalls {
     await this.inboxes.ensure(after.filter(item => item.key === botId || before.includes(item.key)));
     return { botId, primary };
   }
+  /** The person's own routines of a standing bot: the same operations a bot has, by the person, and Test. */
+  async personRoutine(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' }>) {
+    const bot = accountDirectory(this.ports.groups()).find(item => item.key === action.botId && item.key.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
+    if (action.action === 'routine_pause') return this.work.pause(bot, action.name, action.paused);
+    if (action.action === 'routine_delete') return this.work.delete(bot, action.name);
+    if (action.action === 'routine_test') return this.work.test(bot, action.name);
+    const { botId: _bot, action: _action, ...spec } = action;
+    return this.work.setRoutine(bot, spec as RoutineSpec, 'person');
+  }
+  routines(botKey: string) { return this.work.list(botKey); }
   /** The person moves a standing bot to a chief, or to themselves (null). */
   async personSetChief(botId: string, chief: string | null) {
     const directory = accountDirectory(this.ports.groups());
@@ -340,11 +350,16 @@ export class BotCalls {
     const to = chief === null ? undefined : directory.find(item => item.key === chief && item.key.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
     return this.moveChief(bot, to);
   }
-  /** A standing bot keeps its named timers (bots design 6.2). */
-  async setTimer(hostId: string, call: Call<'set_timer'>) {
-    const self = this.main(hostId, call.owner).standing ?? fail('Only a standing bot keeps timers.');
-    return this.work.setTimer(self, call);
+  /** A standing bot keeps its routines by name (routines design 6): set, listed, paused and deleted by the bot itself. */
+  private routineOwner(hostId: string, owner: { providerId: string; nativeSessionId: string }) { return this.main(hostId, owner).standing ?? fail('Only a standing bot keeps routines.'); }
+  async setRoutine(hostId: string, call: Call<'set_routine'>, unattended: boolean) {
+    const { name, schedule, prompt, model, maxRunsPerDay, untilMinutes } = call;
+    return this.work.setRoutine(this.routineOwner(hostId, call.owner), { name, schedule, ...(prompt !== undefined ? { prompt } : {}), ...(model !== undefined ? { model } : {}),
+      ...(maxRunsPerDay !== undefined ? { maxRunsPerDay } : {}), ...(untilMinutes !== undefined ? { untilMinutes } : {}) }, 'bot', unattended);
   }
+  async listRoutines(hostId: string, call: Call<'list_routines'>) { return { routines: this.work.list(this.routineOwner(hostId, call.owner).key) }; }
+  async pauseRoutine(hostId: string, call: Call<'pause_routine'>) { return this.work.pause(this.routineOwner(hostId, call.owner), call.name, call.paused); }
+  async deleteRoutine(hostId: string, call: Call<'delete_routine'>) { return this.work.delete(this.routineOwner(hostId, call.owner), call.name); }
   /** The item of the caller's own board a bot is handed work with. */
   private ownItem(self: Bot, key: number): BoardItem {
     const standing = self.standing ?? fail('Only a standing bot keeps a board.');

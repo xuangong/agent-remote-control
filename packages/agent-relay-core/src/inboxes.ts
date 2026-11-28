@@ -10,7 +10,7 @@ import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './t
 import { plain } from './drafts.js';
 import { assistantSeat, type Assistant, type AssistantBrokerPorts, type AssistantPorts } from './assistants.js';
 import { pruneCoordination } from './coordination-retention.js';
-import { pushBackTimers } from './bot-work.js';
+import { pushBackQuietRoutines } from './routines.js';
 
 const digest = (value: unknown) => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
 /** Which standing instructions a bot was sent: the hash of their text. */
@@ -46,7 +46,7 @@ export class BotInboxes {
     if (inbox.inbox!.instructions !== hash) {
       const seat = inbox.members[0]!;
       const message = { id: digest(['standing', inbox.id, hash]), from: seat.id, to: seat.id, text: standingInstructionsText(bot.mission, bot.memory, bot), status: 'queued' as const, createdAt: now };
-      if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackTimers(inbox, now); }
+      if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackQuietRoutines(inbox, now); }
       inbox.inbox!.instructions = hash;
       inbox.revision++; inbox.updatedAt = now;
     }
@@ -55,7 +55,7 @@ export class BotInboxes {
     if (fresh.length) {
       const seat = inbox.members[0]!, last = fresh.at(-1)!.seq;
       const message = { id: digest(['work-log', inbox.id, last]), from: seat.id, to: seat.id, text: workLogText({ lines: fresh.map(workLogLine), total: fresh.length }), status: 'queued' as const, createdAt: now };
-      if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackTimers(inbox, now); }
+      if (!inbox.messages.some(item => item.id === message.id)) { assertTeamQueueCapacity(inbox, message); inbox.messages.push(message); pushBackQuietRoutines(inbox, now); }
       inbox.inbox!.logSeen = last; inbox.revision++; inbox.updatedAt = now;
     }
     return inbox;

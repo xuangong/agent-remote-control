@@ -114,3 +114,15 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 .lab-bot-audit-thresholds input { width: 8em; }
 .lab-bot-audit-bots { list-style: none; margin: var(--orchard-space-s) 0 0; padding: 0; display: grid; gap: var(--orchard-space-s); }
 .lab-bot-audit-bots li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--orchard-space-xs); }
+
+/* Routines: one row each (name, schedule and next run, who set it, the last run) with its actions; the form is a grouped list of fields. */
+.lab-routines-list > li { gap: var(--orchard-space-2xs); }
+.lab-routines-list small { color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-routines-list li[data-paused] .lab-assistant-session-title { color: var(--orchard-text-secondary); }
+.lab-routines-history { display: grid; gap: var(--orchard-space-2xs); margin: 0; padding: 0; list-style: none; font-size: var(--orchard-type-caption-size); }
+.lab-routine-form { display: grid; gap: var(--orchard-space-s); }
+.lab-routine-form label { display: grid; gap: var(--orchard-space-2xs); color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-routine-form :is(input, select, textarea) { min-width: 0; font: inherit; color: var(--orchard-text); }
+.lab-routine-days { display: flex; flex-wrap: wrap; gap: var(--orchard-space-2xs); margin: 0; padding: 0; border: 0; }
+.lab-routine-days legend { width: 100%; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-routine-days button[aria-pressed="true"] { background: var(--orchard-fill-strong); box-shadow: inset 0 0 0 2px var(--orchard-focus); }

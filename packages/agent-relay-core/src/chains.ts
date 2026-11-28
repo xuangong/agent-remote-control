@@ -19,8 +19,8 @@ const chainId = (parts: unknown[]) => 'c_' + createHash('sha256').update(JSON.st
 export const personChainId = (session: Session, messageId: string) => chainId(['person', session.providerId, session.nativeSessionId, messageId]);
 /** The chain the person's edit of a bot's board starts at that bot. */
 export const editChainId = (botId: string, at: number) => chainId(['edit', botId, at]);
-/** A chain a timer starts when it comes due. */
-export const timerChainId = (inboxId: string, timer: string, at: number) => chainId(['timer', inboxId, timer, at]);
+/** The chain of one run of a routine: named by the bot's inbox, the routine and the run. */
+export const routineChainId = (inboxId: string, routine: string, at: number, run: number) => chainId(['routine', inboxId, routine, at, run]);
 
 /** An in-memory store, for a broker without saved state. */
 export function memoryChains(): ChainStore {
@@ -47,7 +47,7 @@ export class BotChains {
     return latest ? { id: latest.id, cause: 'bot' } : { id: chainId(['bot', randomUUID()]), cause: 'bot' };
   }
   /** Adds what a call in a chain did, starting the chain at this bot if it is new. */
-  async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number }): Promise<void> {
+  async record(scope: ChainScope, start: { cause: BotChain['cause']; bot: string }, turn?: { tokens: number; costUsd?: number; estimatedUsd?: number }): Promise<void> {
     if (!turn && !scope.messages && !scope.created && !scope.subSessions && !scope.bots.size) return;
     const limits = this.store.thresholds();
     const crossed = await this.store.change(chains => {
@@ -58,6 +58,7 @@ export class BotChains {
       if (turn) {
         chain.turns++; chain.usage.tokens += turn.tokens;
         if (turn.costUsd !== undefined) chain.usage.costUsd = (chain.usage.costUsd ?? 0) + turn.costUsd;
+        if (turn.estimatedUsd !== undefined) chain.usage.estimatedUsd = (chain.usage.estimatedUsd ?? 0) + turn.estimatedUsd;
       }
       chain.updatedAt = now;
       // What the chain passed for the first time, measured against the person's thresholds as they are now.
@@ -113,6 +114,11 @@ export class BotChains {
   stopped(id: string, botId: string): boolean {
     const chain = this.store.read().find(item => item.id === id);
     return !!chain && (chain.stopped !== undefined || !!chain.stoppedBots?.includes(botId));
+  }
+  /** Whether the chain began without the person: a routine or an event started it. Its bots may pause or delete routines and set none. */
+  unattended(id: string): boolean {
+    const cause = this.store.read().find(item => item.id === id)?.cause;
+    return cause === 'routine' || cause === 'event' || cause === 'timer';
   }
   list(): BotChain[] { return [...this.store.read()].sort((a, b) => b.updatedAt - a.updatedAt); }
 }

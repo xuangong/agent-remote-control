@@ -4,12 +4,12 @@
  * Relay finds the turn's chain, and the turn's usage is counted in that chain when the turn ends.
  */
 import { createHash } from 'node:crypto';
-import { CHAIN_APPROVAL_POLICY, nativeSessionRefKey, parseTaskInputs, type AgentInteractionRequest, type AgentInteractionResponse, type NativeSessionRef, type TurnCause } from '@orchardworks/agent-remote-protocol';
+import { CHAIN_APPROVAL_POLICY, nativeSessionRefKey, parseTaskInputs, type AgentInteractionRequest, type AgentInteractionResponse, type NativeSessionRef, type TurnCause, type TurnUsage } from '@orchardworks/agent-remote-protocol';
 import type { AgentSession, ProviderStreamItem } from '@orchardworks/agent-provider-sdk';
-import { accountUsage, type SessionUsage } from '../session-usage.js';
+import { accountUsage, type SessionUsage, type UsageParts } from '../session-usage.js';
 
 /** An ended turn: what started it, how it ended (finished unless it failed or was canceled), what it cost, and the last text the session wrote in it. */
-export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number; finalText?: string; outcome?: 'finished' | 'failed' | 'interrupted' }
+export interface TurnReport { cause: TurnCause; tokens: number; costUsd?: number; usage?: TurnUsage; finalText?: string; outcome?: 'finished' | 'failed' | 'interrupted' }
 
 /** The cause of each session's latest input, by native session. */
 export class TurnCauses {
@@ -62,9 +62,9 @@ export function inputCause(item: { text: string; messageId?: string; clientMessa
 export interface PersonInput { messageId: string; text: string }
 
 /** Passes a session's stream through, noting the cause of each input, reporting each ended turn with its usage, and each input the person typed. */
-export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void, written: (input: PersonInput) => void = () => {}, approvals?: ChainApprovals): AgentSession {
+export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, causes: TurnCauses, report: (turn: TurnReport) => void, written: (input: PersonInput) => void = () => {}, approvals?: ChainApprovals, limited: (resetsAt?: number) => void = () => {}): AgentSession {
   const usage: SessionUsage = { tokens: 0 };
-  let counted = { tokens: 0, costUsd: 0 };
+  let counted = { tokens: 0, costUsd: 0 }, countedParts: UsageParts = {}, reportedLimit: string | undefined;
   // The bot's last run of assistant text in the turn: a tool call or another message starts a new run.
   let final = '', writing = false, writingId: string | undefined, directory: string | undefined;
   // The requests a chain choice was added to, as the adapter reported them: the choice itself is never sent to the adapter.
@@ -80,6 +80,11 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
         if (item.type === 'observation' && item.delivery !== 'history') {
           const event = item.event;
           if (event.type === 'runtime_updated' && event.runtimeInfo.cwd) directory = event.runtimeInfo.cwd;
+          // The provider's own usage window: told once per window, so unattended work of this provider waits for it.
+          if (event.type === 'runtime_updated') {
+            const limit = event.runtimeInfo.usageLimit, key = limit ? String(limit.resetsAt ?? 'none') : undefined;
+            if (key !== reportedLimit) { reportedLimit = key; if (limit) limited(limit.resetsAt); }
+          }
           if ((event.type === 'interaction_resolved' || event.type === 'interaction_invalidated')) offered.delete(event.requestId);
           if (event.type === 'interaction_requested' && approvals?.offered() && chainable(event.request)) {
             const request = event.request, cwd = await folder();
@@ -108,10 +113,13 @@ export function watchChainTurns(session: AgentSession, ref: NativeSessionRef, ca
           if (event.type === 'turn_completed') {
             if (event.usage) accountUsage(usage, event.usage, true);
             const cause = causes.of(ref), tokens = usage.tokens - counted.tokens, cost = (usage.costUsd ?? 0) - counted.costUsd;
+            const parts = Object.fromEntries((['input', 'cachedInput', 'cacheCreation', 'output'] as const).flatMap(key => usage.parts?.[key] !== undefined ? [[key, usage.parts[key]! - (countedParts[key] ?? 0)]] : []));
+            countedParts = { ...usage.parts };
             counted = { tokens: usage.tokens, costUsd: usage.costUsd ?? 0 };
+            const model = cause ? (await session.runtimeInfo().catch(() => undefined))?.model : undefined;
             const finalText = final.trim();
             final = ''; writing = false;
-            if (cause) report({ cause, tokens, ...(cost > 0 ? { costUsd: cost } : {}), ...(finalText ? { finalText } : {}) });
+            if (cause) report({ cause, tokens, ...(cost > 0 ? { costUsd: cost } : {}), ...(Object.keys(parts).length || model ? { usage: { ...(model ? { model } : {}), ...parts } } : {}), ...(finalText ? { finalText } : {}) });
           }
         }
         yield item;

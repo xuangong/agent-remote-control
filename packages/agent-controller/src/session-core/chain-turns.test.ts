@@ -21,6 +21,25 @@ function watched() {
 }
 
 describe('the causes and usage of a bot\'s turns', () => {
+  it('reports the parts of a turn\'s usage with its model, each turn only what it used, and the provider\'s usage window once', async () => {
+    const session = new ScriptedSession('fake', 'native', [boundary()]);
+    const causes = new TurnCauses(), turns: TurnReport[] = [], limits: Array<number | undefined> = [], base = await session.runtimeInfo();
+    session.runtimeInfo = async () => ({ ...base, model: 'claude-sonnet-4-5' });
+    void (async () => { for await (const _ of watchChainTurns(session, ref, causes, turn => turns.push(turn), () => {}, undefined, resetsAt => limits.push(resetsAt)).observe()) void _; })();
+    const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+    session.push(input('Go.', 'u1'));
+    session.push(event({ type: 'turn_completed', provider: 'fake', turnId: 't', usage: { tokenScope: 'session', inputTokens: 100, cachedInputTokens: 900, cacheCreationInputTokens: 10, outputTokens: 20, totalTokens: 1030 } } as never));
+    session.push(input('Again.', 'u2'));
+    session.push(event({ type: 'turn_completed', provider: 'fake', turnId: 't', usage: { tokenScope: 'session', inputTokens: 160, cachedInputTokens: 1900, cacheCreationInputTokens: 10, outputTokens: 50, totalTokens: 2120 } } as never));
+    await settle();
+    expect(turns.map(turn => turn.usage)).toEqual([{ model: 'claude-sonnet-4-5', input: 100, cachedInput: 900, cacheCreation: 10, output: 20 }, { model: 'claude-sonnet-4-5', input: 60, cachedInput: 1000, cacheCreation: 0, output: 30 }].map(parts => expect.objectContaining(parts)));
+    const info = await session.runtimeInfo();
+    session.push(event({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { ...info, usageLimit: { resetsAt: 5000 } }, activeTurnId: null } as never));
+    session.push(event({ type: 'runtime_updated', provider: 'fake', runtimeInfo: { ...info, usageLimit: { resetsAt: 5000 } }, activeTurnId: null } as never));
+    await settle();
+    expect(limits).toEqual([5000]);
+  });
+
   it('reports a failed or canceled turn with how it ended and the words it ended with, and a finished one without an outcome', async () => {
     const { session, turns, settle } = watched();
     session.push(input('Run the suite.', 'u1'));

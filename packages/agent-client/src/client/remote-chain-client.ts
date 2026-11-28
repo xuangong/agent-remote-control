@@ -16,7 +16,8 @@ export class RemoteChainClient {
     const value = await this.request('') as Partial<ChainView>;
     if (!Array.isArray(value.chains) || !value.chains.every(isBotChain) || !value.names || typeof value.names !== 'object' || !Array.isArray(value.paused))
       throw withMessageKey(new Error('The audit is unavailable.'), 'client.error.auditUnavailable');
-    return { chains: value.chains, names: value.names, paused: value.paused, thresholds: value.thresholds ?? {} };
+    return { chains: value.chains, names: value.names, paused: value.paused, thresholds: value.thresholds ?? {}, ...(value.routines && typeof value.routines === 'object' ? { routines: value.routines } : {}),
+      ...(value.unattended && typeof value.unattended === 'object' ? { unattended: value.unattended } : {}) };
   }
   async act(action: ChainAction): Promise<void> { await this.request('/action', action); }
   /** The person edits a standing bot's items and plan note; the answer says what a stale edit overwrote. */

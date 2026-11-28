@@ -20,4 +20,13 @@ describe('the person\'s board edit through the audit route', () => {
     await expect(new RemoteChainClient('https://relay.test/', reply({ error: 'No item 9 on the board.' }, 409) as never).writeBoard(bot, {})).rejects.toThrow('No item 9');
     await expect(new RemoteChainClient('https://relay.test/', reply({ items: 'x' }) as never).writeBoard(bot, {})).rejects.toThrow();
   });
+
+  it('lists the chains with the bots\' routines and the unattended work as the Relay reports them, and neither when it reports none', async () => {
+    const unattended = { settings: { budget: { perDay: 5 } }, timeZone: 'UTC', day: '2026-11-30', today: { usd: 1, bots: {} }, month: { usd: 1, bots: {} }, limits: [], tripped: [], unpriced: [] };
+    const routines = { [bot]: [] };
+    const view = await new RemoteChainClient('https://relay.test/', reply({ chains: [], names: {}, paused: [], thresholds: {}, routines, unattended }) as never).list();
+    expect(view).toMatchObject({ routines, unattended });
+    const plain = await new RemoteChainClient('https://relay.test/', reply({ chains: [], names: {}, paused: [] }) as never).list();
+    expect(plain).not.toHaveProperty('unattended'); expect(plain).not.toHaveProperty('routines');
+  });
 });

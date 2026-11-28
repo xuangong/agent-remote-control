@@ -12,7 +12,7 @@ test('lists chains by cause, marks a stopped chain and a passed threshold, and a
   await page.goto('/e2e/fixtures/bot-audit.html');
   const audit = page.getByRole('main', { name: 'Audit' });
   await expect(audit.getByText('You asked Chief of staff').filter({ visible: true }).first()).toBeVisible();
-  await expect(audit.getByText('Timer of Release tracker').filter({ visible: true }).first()).toBeVisible();
+  await expect(audit.getByText('Routine of Release tracker').filter({ visible: true }).first()).toBeVisible();
   await expect(audit.getByText('Passed: Tokens, Reply depth').filter({ visible: true }).first()).toBeVisible();
   await expect(audit.getByText('Stopped').filter({ visible: true }).first()).toBeVisible();
   expect(await fitsWidth(page)).toBe(true);

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, joinTaskInputs, workLogText, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, joinTaskInputs, workLogText, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, routineText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -37,10 +37,10 @@ it('folds a bot\'s standing instructions into one quiet line, never the person\'
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 
-it('folds a due timer into one quiet line that opens to the bot\'s open work', async () => {
-  const container = await render(<UserMessageItem item={message(timerText({ name: 'work', items: [{ title: 'Release notes', status: 'waiting', report: 'Publish' }] }))} />);
-  const folded = container.querySelector('details[data-timer="work"]')!;
-  expect(folded.querySelector('summary')?.textContent).toBe('Timer "work" is due');
+it('folds a due quiet routine into one quiet line that opens to the bot\'s open work', async () => {
+  const container = await render(<UserMessageItem item={message(routineText({ name: 'work', detail: 'quiet', quiet: true, items: [{ title: 'Release notes', status: 'waiting', report: 'Publish' }] }))} />);
+  const folded = container.querySelector('details[data-routine="work"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('Routine "work" is due');
   expect(folded.textContent).toContain('Release notes · waiting · Publish');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });

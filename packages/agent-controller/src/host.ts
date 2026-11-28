@@ -505,6 +505,10 @@ export function createAgentHostRuntime(options: AgentHostRuntimeOptions): AgentH
       try { await lease.agent.respondToInteraction(requestId, response); } finally { lease.release(); }
     },
     title: async ref => await providers.require(ref.providerId).directory.sessionTitle?.(ref.nativeSessionId),
+    models: async ref => {
+      const lease = await automationAccess.acquire(ref.providerId, ref.nativeSessionId);
+      try { return lease.agent.snapshot().payload.runtimeInfo.settings?.find(setting => setting.id === 'model' && setting.category === 'model')?.options.map(option => option.value); } finally { lease.release(); }
+    },
     head: async ref => {
       const cwd = await sessionDirectory(ref);
       if (!cwd) throw new Error('This session\'s working directory is unknown.');

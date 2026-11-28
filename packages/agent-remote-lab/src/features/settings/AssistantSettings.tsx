@@ -10,6 +10,8 @@ import { SettingsRow, SettingsSection } from './SettingsRow.js';
 /** The audit loads with the section that shows it. */
 const BotAudit = lazy(() => import('./BotAudit.js').then(module => ({ default: module.BotAudit })));
 
+const UnattendedSettings = lazy(() => import('./UnattendedSettings.js').then(module => ({ default: module.UnattendedSettings })));
+
 /** This device's session notifications as the attention hook keeps them. */
 export interface DeviceNotifications {
   readonly enabled: boolean; readonly available: boolean; set(enabled: boolean): void;
@@ -41,6 +43,10 @@ export function AssistantSettings({ items, notifications, baseUrl }: { items: re
         <Toggle label={t('settings.letters')} checked={letters} onChange={setLetters} />
       </SettingsRow>
     </SettingsSection>
+    {items.includes('unattended') && baseUrl !== undefined ? <SettingsSection title={t('routines.unattended.title')}>
+      <p className="lab-setting-note">{t('routines.unattended.hint')}</p>
+      <Suspense fallback={null}><UnattendedSettings baseUrl={baseUrl} /></Suspense>
+    </SettingsSection> : null}
     {items.includes('audit') && baseUrl !== undefined ? <SettingsSection title={t('settings.audit')}>
       <p className="lab-setting-note">{t('settings.audit.hint')}</p>
       <Suspense fallback={null}><BotAudit baseUrl={baseUrl} /></Suspense>

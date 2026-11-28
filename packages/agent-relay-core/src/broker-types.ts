@@ -1,4 +1,4 @@
-import type { BotChain, BotFact, ChainThresholds } from '@orchardworks/agent-remote-protocol';
+import type { BotChain, BotFact, ChainThresholds, UnattendedState } from '@orchardworks/agent-remote-protocol';
 import type { WindowGroup, WindowSessionBinding, WindowBotDetails } from '@orchardworks/agent-remote-protocol';
 import type { SavedTeam } from './team-delivery.js';
 import type { AttachmentStore } from './attachments.js';
@@ -79,6 +79,8 @@ export interface RemoteHostBrokerState {
   chains?: BotChain[];
   /** The person's thresholds for chains. */
   chainThresholds?: ChainThresholds;
+  /** The account's unattended work: settings, usage and provider limits (routines design 11). */
+  unattended?: UnattendedState;
   revokedHosts?: RevokedHost[];
   /** Hosts that were revoked and whose journals are not yet confirmed deleted. */
   journalDeletions?: string[];

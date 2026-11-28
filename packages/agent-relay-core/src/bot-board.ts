@@ -7,7 +7,7 @@ import { BOARD_BRIEF_LIMIT, BOARD_FIELDS, BOARD_ITEM_LIMIT, BOARD_KEEP_MS, BOARD
   type BoardLink, type BoardStatus, type TeamInbox } from '@orchardworks/agent-remote-protocol';
 import type { Assistant, AssistantBrokerPorts } from './assistants.js';
 import type { BotInboxes } from './inboxes.js';
-import type { BotWork } from './bot-work.js';
+import type { BotRoutines } from './routines.js';
 
 const fail = (message: string): never => { throw new Error(message); };
 type Writer = BoardItem['updatedBy'];
@@ -175,12 +175,12 @@ export function reportItem(box: TeamInbox, assignee: string, key: number | undef
 
 /** The board's calls on the inbox of a standing bot. */
 export class BotBoard {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly inboxes: BotInboxes, private readonly work: BotWork) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly inboxes: BotInboxes, private readonly work: BotRoutines) {}
   private async change<T>(bot: Assistant, update: (box: TeamInbox, now: number) => T): Promise<T> {
     const value = await this.broker.change(teams => {
       const now = this.broker.ports.now(), inbox = this.inboxes.prepare(teams, bot, now) ?? fail('Team capacity reached.');
       const result = update(inbox.inbox!, now);
-      this.work.syncTimer(inbox, now);
+      this.work.syncWorkRoutine(inbox, now);
       inbox.revision++; inbox.updatedAt = now;
       return result;
     });

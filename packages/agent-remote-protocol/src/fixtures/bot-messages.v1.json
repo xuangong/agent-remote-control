@@ -221,13 +221,16 @@
         "subSessionId": "Collect logs"
       },
       {
-        "action": "set_timer",
+        "action": "set_routine",
         "owner": {
           "providerId": "claude",
           "nativeSessionId": "main"
         },
         "name": "Check in",
-        "minutes": 10,
+        "schedule": {
+          "kind": "quiet",
+          "minutes": 10
+        },
         "untilMinutes": 120
       },
       {
@@ -242,6 +245,94 @@
         "fork": {
           "turns": 2,
           "context": "The following is quoted conversation history from another session.\n<session-context id=\"fork\">[]</session-context>"
+        }
+      },
+      {
+        "action": "set_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Morning check",
+        "schedule": {
+          "kind": "weekdays",
+          "days": [
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "time": "08:30"
+        },
+        "prompt": "Summarise the overnight failures.",
+        "model": "claude-haiku-4-5",
+        "maxRunsPerDay": 3,
+        "cause": {
+          "kind": "person",
+          "messageId": "m1"
+        }
+      },
+      {
+        "action": "set_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Heartbeat",
+        "schedule": {
+          "kind": "every",
+          "minutes": 15
+        }
+      },
+      {
+        "action": "list_routines",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        }
+      },
+      {
+        "action": "pause_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Morning check",
+        "paused": true
+      },
+      {
+        "action": "delete_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Morning check"
+      },
+      {
+        "action": "provider_limit",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "resetsAt": 1790000000000
+      },
+      {
+        "action": "chain_turn",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "cause": {
+          "kind": "framed"
+        },
+        "tokens": 1200,
+        "usage": {
+          "model": "claude-sonnet-4-5",
+          "input": 100,
+          "cachedInput": 900,
+          "cacheCreation": 10,
+          "output": 190
         }
       }
     ],
@@ -502,13 +593,16 @@
         "bot": "Chief"
       },
       {
-        "action": "set_timer",
+        "action": "set_routine",
         "owner": {
           "providerId": "claude",
           "nativeSessionId": "main"
         },
         "name": "Check in",
-        "minutes": 10,
+        "schedule": {
+          "kind": "quiet",
+          "minutes": 10
+        },
         "untilMinutes": 0
       },
       {
@@ -536,6 +630,56 @@
         "prompt": "Review the plan.",
         "fork": {
           "turns": 2
+        }
+      },
+      {
+        "action": "set_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Cron",
+        "schedule": {
+          "kind": "cron",
+          "expression": "* * * * *"
+        }
+      },
+      {
+        "action": "set_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Too often",
+        "schedule": {
+          "kind": "every",
+          "minutes": 4
+        }
+      },
+      {
+        "action": "set_routine",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "name": "Bad time",
+        "schedule": {
+          "kind": "daily",
+          "time": "8:30"
+        }
+      },
+      {
+        "action": "chain_turn",
+        "owner": {
+          "providerId": "claude",
+          "nativeSessionId": "main"
+        },
+        "cause": {
+          "kind": "framed"
+        },
+        "tokens": 1,
+        "usage": {
+          "input": -1
         }
       }
     ]

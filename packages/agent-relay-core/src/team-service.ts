@@ -8,7 +8,8 @@
  * not announce Teams or tasks is refused with a 409 that says to update the Controller.
  */
 import { validChains } from './broker-state.js';
-import type { BotChain, ChainThresholds } from '@orchardworks/agent-remote-protocol';
+import { isUnattendedState, type BotChain, type ChainThresholds, type UnattendedState } from '@orchardworks/agent-remote-protocol';
+import { emptyUnattended } from './unattended.js';
 import { defaultBrokerScheduler } from './transport.js';
 import { isDeepStrictEqual } from 'node:util';
 import { resolveRoleSuccession, type NativeSessionRef } from '@orchardworks/agent-remote-protocol';
@@ -54,7 +55,15 @@ export function createTeamService(ports: TeamServicePorts) {
       draft.chainThresholds = next; return { value: undefined, publish() { brokerState.chainThresholds = next; } };
     }),
   };
-  const teams = new TeamBroker({ chains, ...(options.alertChain ? { alertChain: options.alertChain } : {}),
+  const unattended = {
+    read: () => brokerState.unattended ?? emptyUnattended(),
+    change: <T>(update: (state: UnattendedState) => T) => brokerState.commit(draft => {
+      const next = structuredClone(brokerState.unattended ?? emptyUnattended()), value = structuredClone(update(next));
+      if (!isUnattendedState(next)) throw new Error('Invalid unattended state.');
+      draft.unattended = next; return { value, publish() { brokerState.unattended = next; } };
+    }),
+  };
+  const teams = new TeamBroker({ chains, unattended, ...(options.alertChain ? { alertChain: options.alertChain } : {}),
     resolveSession: resolveRole,
     places: createHostPlaces({ hosts: () => [...brokerState.hosts.values()], rpc: (host, method, path, sessionId, body) => ports.rpc(host, method, path, sessionId, body) }),
     scheduler: options.scheduler ?? defaultBrokerScheduler,

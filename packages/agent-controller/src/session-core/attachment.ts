@@ -180,7 +180,7 @@ export function createAttachment(ctx: SessionCoreContext) {
           ? watchTurns(exiting, { silenceMs: TURN_SILENCE_MS, unresponsive: () => { void releaseRuntime(binding).catch(() => undefined); } }) : exiting;
         // A bot's turns, and what started each, count in their chains (bots design 7).
         const support = ctx.workerSupport;
-        const watched = support ? watchChainTurns(timed, attached, support.causes, turn => support.turnEnded(attached, turn), input => support.personWrote(attached, input), support.approvalsFor(attached)) : timed;
+        const watched = support ? watchChainTurns(timed, attached, support.causes, turn => support.turnEnded(attached, turn), input => support.personWrote(attached, input), support.approvalsFor(attached), resetsAt => support.providerLimited(attached, resetsAt)) : timed;
         const noted = sessionRefs && parentNativeSessionId === undefined ? withReferenceNotes(watched, {
           pending: () => pendingReferenceNote({ providerId, nativeSessionId }, sessionRefs),
           delivered: revision => sessionRefs.store.markDelivered({ providerId, nativeSessionId }, revision),

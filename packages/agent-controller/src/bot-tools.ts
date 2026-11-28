@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { TurnCauses, type ChainApprovals, type PersonInput, type TurnReport } from './session-core/chain-turns.js';
 import type { AgentSessionTool, AgentSessionToolNamespace } from '@orchardworks/agent-provider-sdk';
-import type { AgentInteractionResponse } from '@orchardworks/agent-remote-protocol';
+import type { AgentInteractionResponse, RoutineSchedule } from '@orchardworks/agent-remote-protocol';
 import { TASK_WORKER_NAMESPACE } from './sub-session-roles.js';
 import { lastTurns } from './turn-reading.js';
-import { ASSISTANT_MESSAGE_LIMIT, FORK_TURNS_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, PAGE_CONTENTS_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { ROUTINE_PROMPT_LIMIT, ASSISTANT_MESSAGE_LIMIT, FORK_TURNS_LIMIT, ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, BOT_FACT_LIMIT, BOT_MESSAGE_LIMIT, PAGE_CONTENTS_LIMIT, nativeSessionRefKey, PERSON_WROTE_LIMIT, ROOM_MINUTES_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TITLE_LIMIT, type BotFact, type NativeSessionRef, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { botInstructions } from './bot-instructions.js';
 
 /** The local files of attachments: one a bot sends, and one it downloads. */
@@ -30,6 +30,8 @@ export interface BotToolsPorts {
   workerSeat?(ref: NativeSessionRef): { teamId: string; memberId: string } | undefined;
   /** Answers a pending interaction of a session on this Host, as the person's decision applied. */
   answer?(ref: NativeSessionRef, requestId: string, response: AgentInteractionResponse): Promise<void>;
+  /** The models the session's provider offers (its `model` session setting), or undefined when it lists none; a routine's model is one of them. */
+  models?(ref: NativeSessionRef): Promise<string[] | undefined>;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
   head?(ref: NativeSessionRef): Promise<string>;
   /** The provider keeps a session it starts from writing its working directory. */
@@ -92,12 +94,12 @@ export class BotTools {
     if (seat) void (async () => {
       // A worktree sub-session's changes reach its bot as a patch with its result.
       const patch = await this.ports.patch?.(ref).catch(() => undefined), text = turn.finalText ? cutFinal(turn.finalText) : undefined;
-      await this.ports.request({ action: 'sub_turn_end', ...seat, outcome: turn.outcome ?? 'finished', ...(text || patch ? { text: [text, patch].filter(Boolean).join('\n\n').slice(0, TASK_SUMMARY_LIMIT) } : {}) });
+      await this.ports.request({ action: 'sub_turn_end', ...seat, outcome: turn.outcome ?? 'finished', tokens: turn.tokens, ...(turn.usage ? { usage: turn.usage } : {}), ...(text || patch ? { text: [text, patch].filter(Boolean).join('\n\n').slice(0, TASK_SUMMARY_LIMIT) } : {}) });
     })().catch(() => undefined);
     // Only a finished turn counts in a chain and answers anyone.
     if (turn.outcome !== undefined && turn.outcome !== 'finished') return;
     if (this.tools(ref) !== 'tasks' && this.ports.answering?.(ref) !== true) return;
-    void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}) }).catch(() => undefined);
+    void this.ports.request({ action: 'chain_turn', owner, cause: turn.cause, tokens: turn.tokens, ...(turn.costUsd !== undefined ? { costUsd: turn.costUsd } : {}), ...(turn.usage ? { usage: turn.usage } : {}) }).catch(() => undefined);
     if (turn.cause.kind === 'framed' && turn.cause.asked && turn.finalText)
       void this.ports.request({ action: 'bot_answer', owner, text: turn.finalText.slice(0, ASSISTANT_MESSAGE_LIMIT), cause: { kind: 'framed', asked: true } }).catch(() => undefined);
     else if (turn.cause.kind === 'framed' && turn.cause.answers && turn.finalText && this.ports.takesTools?.(ref) === false)
@@ -107,6 +109,11 @@ export class BotTools {
    * The person wrote into a bot's session: its Relay tells its chief, if a bot, the first 300 characters framed as what they are
    * (bots design 3.5). The Host sends the person's own words from the record of the input, never a model's.
    */
+  /** The session's provider reported a usage limit: the Relay holds unattended work of this provider until it resets. */
+  providerLimited(ref: NativeSessionRef, resetsAt?: number): void {
+    if (this.tools(ref) !== 'tasks') return;
+    void this.ports.request({ action: 'provider_limit', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, ...(resetsAt !== undefined ? { resetsAt } : {}) }).catch(() => undefined);
+  }
   personWrote(ref: NativeSessionRef, input: PersonInput): void {
     if (this.tools(ref) !== 'tasks') return;
     void this.ports.request({ action: 'bot_told', owner: { providerId: ref.providerId, nativeSessionId: ref.nativeSessionId }, text: input.text.slice(0, PERSON_WROTE_LIMIT), cause: { kind: 'person', messageId: input.messageId } }).catch(() => undefined);
@@ -307,9 +314,17 @@ export class BotTools {
       tool('read_page', 'Read a page: with page_id its title and contents, without it the list of pages (id, title, version, updated). bot: the pages of another bot of this account (default: yours); every page is readable, only its bot writes it.',
         object({ page_id: { type: 'string', pattern: '^pg_[0-9a-f]{12}$' }, bot: { type: 'string', minLength: 1, maxLength: 300 } }, []),
         args => taskRequest({ action: 'read_page', owner: caller(), ...(args.page_id ? { pageId: args.page_id } : {}), ...(args.bot ? { bot: args.bot } : {}) })),
-      tool('set_timer', 'Set a named timer that reminds you after the given minutes of quiet: every message that reaches you pushes it back, so it only fires when nothing happens. Use it to look after work that waits on others; while you have open board items a default timer reminds you of them. until_minutes ends the timer by itself after that many minutes from now (leave it out for a timer that runs until you clear it). minutes 0 clears it. When it fires, it lists your live sub-sessions.',
-        object({ name: { type: 'string', minLength: 1, maxLength: 60 }, minutes: { type: 'integer', minimum: 0, maximum: 10080 }, until_minutes: { type: 'integer', minimum: 1, maximum: 43200 } }, ['name', 'minutes']),
-        args => taskRequest({ action: 'set_timer', owner: caller(), name: args.name, minutes: args.minutes, ...(args.until_minutes !== undefined ? { untilMinutes: args.until_minutes } : {}) })),
+      tool('set_routine', 'Set a named routine of yours (replacing the one of that name): a prompt you get on a schedule, or after quiet. Give exactly one of: quiet_minutes (reminds you after that many minutes of quiet; every message that reaches you pushes it back, so it only fires when nothing happens; use it to look after work that waits on others, and while you have open board items a default one reminds you of them), every_minutes (5 to 1440), daily_at ("HH:MM" in the person\'s time zone), weekdays with at (days 1 Monday to 7 Sunday and "HH:MM"), or in_minutes (once). prompt is what to do when it fires. model names the model its runs use, if not yours: one of the models your provider offers, and another is refused with the list. until_minutes ends the routine by itself after that many minutes from now. max_runs_per_day caps its runs. It takes effect at once and the person sees it in your details. You cannot set routines from a run of a routine; there you may pause or delete them.',
+        object({ name: { type: 'string', minLength: 1, maxLength: 60 }, quiet_minutes: { type: 'integer', minimum: 1, maximum: 10080 }, every_minutes: { type: 'integer', minimum: 5, maximum: 1440 },
+          daily_at: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }, weekdays: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7 }, at: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' },
+          in_minutes: { type: 'integer', minimum: 1, maximum: 525600 }, prompt: { type: 'string', minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT }, model: { type: 'string', minLength: 1, maxLength: 256 },
+          until_minutes: { type: 'integer', minimum: 1, maximum: 43200 }, max_runs_per_day: { type: 'integer', minimum: 1, maximum: 200 } }, ['name']),
+        async args => { await checkModel(this.ports, worker(), args.model as string | undefined); return taskRequest({ action: 'set_routine', owner: caller(), name: args.name, schedule: routineSchedule(args, Date.now()), ...(args.prompt !== undefined ? { prompt: args.prompt } : {}), ...(args.model !== undefined ? { model: args.model } : {}),
+          ...(args.max_runs_per_day !== undefined ? { maxRunsPerDay: args.max_runs_per_day } : {}), ...(args.until_minutes !== undefined ? { untilMinutes: args.until_minutes } : {}), ...cause() }); }),
+      tool('list_routines', 'List your routines: name, schedule, next due time, paused, and the last runs of each.', object({}, []), () => taskRequest({ action: 'list_routines', owner: caller() })),
+      tool('pause_routine', 'Pause one of your routines (paused true) or resume it (paused false).', object({ name: { type: 'string', minLength: 1, maxLength: 60 }, paused: { type: 'boolean' } }, ['name', 'paused']),
+        args => taskRequest({ action: 'pause_routine', owner: caller(), name: args.name, paused: args.paused })),
+      tool('delete_routine', 'Delete one of your routines by name.', object({ name: { type: 'string', minLength: 1, maxLength: 60 } }, ['name']), args => taskRequest({ action: 'delete_routine', owner: caller(), name: args.name })),
       tool('open_room', 'Open a room: a conversation of you and other assistants of this account (by name) about a topic, for a set number of minutes. The topic is your first message; the room then asks one member at a time to speak, with the messages it has not seen, and you are asked again when there is something new. The person sees the room and may write in it.',
         object({ name: { type: 'string', minLength: 1, maxLength: 120 }, topic: { type: 'string', minLength: 1, maxLength: ASSISTANT_MESSAGE_LIMIT },
           members: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 300 }, minItems: 1, maxItems: 7 }, minutes: { type: 'integer', minimum: 1, maximum: ROOM_MINUTES_LIMIT }, operationId: id }, ['name', 'topic', 'members', 'minutes']),
@@ -327,4 +342,22 @@ export class BotTools {
     return { name: WORKER_NAMESPACE, description: 'Agent Remote Control: start bots that work in parallel and report back, message the account\'s other bots, keep your board, and read and stop your staff.',
       ...(deferred ? { deferred: true } : {}), tools: coordination };
   }
+}
+
+/** The schedule a `set_routine` call names: exactly one form, or the call is refused. */
+function routineSchedule(args: Record<string, unknown>, now: number): RoutineSchedule {
+  const forms = [args.quiet_minutes, args.every_minutes, args.daily_at, args.weekdays, args.in_minutes].filter(value => value !== undefined);
+  if (forms.length !== 1) throw new Error('Give exactly one of quiet_minutes, every_minutes, daily_at, weekdays with at, or in_minutes.');
+  if (args.quiet_minutes !== undefined) return { kind: 'quiet', minutes: args.quiet_minutes as number };
+  if (args.every_minutes !== undefined) return { kind: 'every', minutes: args.every_minutes as number };
+  if (args.daily_at !== undefined) return { kind: 'daily', time: args.daily_at as string };
+  if (args.weekdays !== undefined) return { kind: 'weekdays', days: args.weekdays as number[], time: typeof args.at === 'string' ? args.at : fail('weekdays needs at ("HH:MM").') };
+  return { kind: 'once', at: now + (args.in_minutes as number) * 60_000 };
+}
+
+/** A routine's model must be one the session's provider offers; the answer lists them, so the bot chooses again without guessing. */
+async function checkModel(ports: BotToolsPorts, ref: NativeSessionRef, model: string | undefined): Promise<void> {
+  if (model === undefined) return;
+  const offered = await ports.models?.(ref).catch(() => undefined);
+  if (offered?.length && !offered.includes(model)) throw new Error(`"${model}" is not a model this provider offers. Choose one of: ${offered.join(', ')}.`);
 }

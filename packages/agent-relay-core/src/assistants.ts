@@ -10,7 +10,7 @@ import { ACCOUNT_TEAM_LIMIT, assertTeamQueueCapacity, type SavedTeam } from './t
 import { plain } from './drafts.js';
 import type { TeamBrokerPorts } from './teams.js';
 import type { BotInboxes } from './inboxes.js';
-import { pushBackTimers } from './bot-work.js';
+import { pushBackQuietRoutines } from './routines.js';
 
 /** What the Team broker lends assistant messages. */
 export interface AssistantBrokerPorts {
@@ -137,7 +137,7 @@ export class AssistantMessages {
         // The person's words to a bot are framed as what they are, from the record; any other text is a bot's message.
         text: call.frame === 'person' ? personWroteText({ bot: from.name, text: call.text }) : assistantMessageText({ messageId, from: from.name, ...(call.replyTo ? { replyTo: call.replyTo, ...(call.final ? { final: true } : {}) } : {}), ...(call.tag ? { tag: call.tag } : {}), body: call.text }) };
       assertTeamQueueCapacity(inbox, message);
-      inbox.messages.push(message); pushBackTimers(inbox, now);
+      inbox.messages.push(message); pushBackQuietRoutines(inbox, now);
       recent.push({ id: messageId, from: from.key, hop, operationId: call.operationId });
       if (recent.length > RECENT_KEEP) recent.splice(0, recent.length - RECENT_KEEP);
       inbox.revision++; inbox.updatedAt = now;
@@ -155,7 +155,7 @@ export class AssistantMessages {
       const message = { id: digest(['notice', inbox.id, ...key]), from: seat.id, to: seat.id, status: 'queued' as const, createdAt: now, text };
       if (inbox.messages.some(item => item.id === message.id)) return;
       assertTeamQueueCapacity(inbox, message);
-      inbox.messages.push(message); pushBackTimers(inbox, now);
+      inbox.messages.push(message); pushBackQuietRoutines(inbox, now);
       inbox.revision++; inbox.updatedAt = now;
     });
     await this.inboxes.bind(to);

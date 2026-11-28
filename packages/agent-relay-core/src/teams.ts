@@ -8,14 +8,15 @@ import { roomAction, Rooms } from './rooms.js';
 import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
 import { BotAsks } from './bot-asks.js';
-import { BotWork } from './bot-work.js';
+import { BotRoutines } from './routines.js';
+import { Unattended, memoryUnattended, type UnattendedStore } from './unattended.js';
 import { BotPages } from './bot-pages.js';
 import { BotBoard } from './bot-board.js';
 import { BotChains, editChainId, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, subSessionId } from './chain-scope.js';
 import { actOnBot, stopInTeams } from './audit.js';
 import { TaskGroups, taskAction, taskPresence, taskSettled, type TaskPorts } from './tasks.js';
-import { nativeSessionRefKey, type TeamAskRequest, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
+import { estimateCost, nativeSessionRefKey, type Routine, type TeamAskRequest, type BotMessageResult, type NativeSessionRef, isTeamMember, type Team, type TeamAction, type TeamCreate, type TeamHostCall, type TeamMember, type TeamMessage, type TeamSeat, type TurnCause, type BotChain, type ChainAction, type ChainView } from '@orchardworks/agent-remote-protocol';
 
 export interface TeamBrokerPorts {
   /** Timers of the Relay, for what must happen on time: a room's deadline and a member's turn. */
@@ -35,6 +36,8 @@ export interface TeamBrokerPorts {
   assistants?: AssistantPorts;
   /** Where the account's chains are kept; in memory when absent. */
   chains?: ChainStore;
+  /** Where the account's unattended settings, usage and provider limits are kept; in memory when absent. */
+  unattended?: UnattendedStore;
   /** Where the files bots attach to messages are kept (bots design 3.4); absent, this Relay takes no attachments. */
   attachments?: AttachmentStore;
   /** Where bots can work: the account's Hosts and their folders, read from their Controllers when asked. */
@@ -62,11 +65,13 @@ export class TeamBroker {
   private readonly rooms?: Rooms;
   private readonly inboxes?: BotInboxes;
   private readonly bots?: BotCalls;
-  private readonly work?: BotWork;
+  private readonly work?: BotRoutines;
   private readonly asks?: BotAsks;
   readonly chains: BotChains;
+  readonly unattended: Unattended;
   constructor(private readonly ports: TeamBrokerPorts) {
     const key = (session: { hostId: string; providerId: string; nativeSessionId: string }) => { try { return nativeSessionRefKey(ports.resolveSession(session.hostId, session.providerId, session.nativeSessionId)); } catch { return undefined; } };
+    this.unattended = new Unattended(ports.unattended ?? memoryUnattended(), () => ports.now());
     this.chains = new BotChains(ports.chains ?? memoryChains(), () => ports.now(), (a, b) => { const left = key(a); return left !== undefined && left === key(b); },
       (chain, passed) => {
         // The reminder names the bot that started the chain, or the latest of its bots still there when that one is gone.
@@ -76,7 +81,11 @@ export class TeamBroker {
     if (ports.assistants) {
       const lent = { ports, change: <T>(update: (teams: SavedTeam[]) => T) => this.change(update), provision: (teamId: string, memberId: string) => this.provision(teamId, memberId) };
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
-      this.work = new BotWork(lent, this.inboxes, this.chains);
+      this.work = new BotRoutines(lent, this.inboxes, this.chains, { zone: () => this.unattended.zone(),
+        refuse: (inbox, routine, now) => this.unattended.refuse(inbox.inbox!.botId, `${inbox.members[0]!.hostId}/${inbox.members[0]!.providerId}`, routine, now),
+        started: bot => this.unattended.countRun(bot),
+        startSub: async start => { await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
+          name: start.name.slice(0, 120), prompt: start.prompt, model: start.model }); } });
       this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, new BotPages(lent, this.inboxes), ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
@@ -154,11 +163,18 @@ export class TeamBroker {
     }
     return fail('This action is not available.');
   }
+  /** The routines of a standing bot as they stand now. */
+  routines(botKey: string): Routine[] { return this.work?.list(botKey) ?? []; }
+  /** The person runs a routine of a bot now. */
+  routineTest(botKey: string, name: string) { return (this.bots ?? fail(unavailableAssistants)).personRoutine({ action: 'routine_test', botId: botKey, name }); }
   /** The account's chains, newest first, and the names of the bots they name. */
   chainView(): ChainView {
     const chains = this.chains.list(), wanted = new Set(chains.flatMap(chain => chain.bots)), names: Record<string, string> = {};
     for (const bot of this.ports.assistants ? accountDirectory(this.ports.assistants.groups()) : []) if (wanted.has(bot.key)) names[bot.key] = bot.name;
-    return { chains, names, thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId) };
+    const routines: Record<string, Routine[]> = {};
+    for (const team of this.ports.read()) if (team.inbox && team.status === 'active' && team.inbox.routines?.length) routines[team.inbox.botId] = this.work?.list(team.inbox.botId) ?? [];
+    void this.unattended.touch()?.catch(() => undefined);
+    return { chains, names, unattended: this.unattended.view(), thresholds: this.chains.thresholds(), paused: this.ports.read().filter(team => team.inbox?.paused).map(team => team.inbox!.botId), routines };
   }
   /** The person mentions a bot from a conversation: the bot answers in its answer session for that conversation (bots plan 8b). */
   async ask(input: TeamAskRequest): Promise<Team> { return this.project(await (this.asks ?? fail(unavailableAssistants)).ask(input)); }
@@ -186,6 +202,8 @@ export class TeamBroker {
       try { return await inChain(scope, () => bots.personUpdateBoard(action.botId, action.items, action.plan)); }
       finally { await this.chains.record(scope, { cause: 'person', bot: action.botId }).catch(() => undefined); }
     }
+    if (action.action === 'routine_set' || action.action === 'routine_pause' || action.action === 'routine_delete' || action.action === 'routine_test') return (this.bots ?? fail(unavailableAssistants)).personRoutine(action);
+    if (action.action === 'set_unattended') return this.unattended.patch(action.patch);
     if (action.action === 'set_primary') return (this.bots ?? fail(unavailableAssistants)).personSetPrimary(action.botId, action.primary);
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
     if (action.action !== 'pause_bot' && action.action !== 'resume_bot') fail('This action is not available.');
@@ -230,7 +248,23 @@ export class TeamBroker {
     if (call.action === 'get_sub_session_status') return (this.bots ?? fail(unavailableAssistants)).subStatus(hostId, call);
     if (call.action === 'stop_sub_session') return (this.bots ?? fail(unavailableAssistants)).stopSub(hostId, call);
     if (call.action === 'sub_update') return (this.bots ?? fail(unavailableAssistants)).subUpdate(hostId, call);
-    if (call.action === 'sub_turn_end') { assertCurrent(); return (this.bots ?? fail(unavailableAssistants)).subTurnEnd(hostId, call); }
+    if (call.action === 'sub_turn_end') {
+      assertCurrent();
+      const result = await (this.bots ?? fail(unavailableAssistants)).subTurnEnd(hostId, call);
+      // A routine's run in a sub-session of its own ends with the sub-session's turn; its team is named by the run's chain.
+      const team = this.ports.read().find(item => item.id === call.teamId);
+      if (team?.operationId.startsWith('routine:')) {
+        const chainId = team.operationId.slice('routine:'.length), bot = this.chains.list().find(chain => chain.id === chainId)?.bot, estimate = estimateCost(call.usage, call.tokens ?? 0, this.unattended.settings());
+        if (bot) {
+          await this.chains.record(chainScope(chainId), { cause: 'routine', bot }, { tokens: call.tokens ?? 0, estimatedUsd: estimate.usd }).catch(() => undefined);
+          await this.unattended.record(bot, estimate, call.usage?.model).catch(() => undefined);
+        }
+        await this.work?.turnEnded(chainId, { tokens: estimate.tokens || call.tokens || 0, usd: estimate.usd, flags: estimate.flags }, call.outcome, call.text);
+        // The sub-session did its one piece of work: it ends, so a routine that runs often does not fill the bot's sub-sessions.
+        await this.change(teams => { const own = find(teams, call.teamId); if (own.task?.state !== 'ended') taskAction(own, this.ports.now(), 'person'); }).catch(() => undefined);
+      }
+      return result;
+    }
     if (call.action === 'sub_told') { assertCurrent(); return (this.tasks ?? fail(unavailableTasks)).tell(hostId, call); }
     if (call.action === 'create_bot') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained(hostId, call.owner, call.cause, () => bots.create(hostId, call)); }
     if (call.action === 'bot_message') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.message(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
@@ -238,12 +272,31 @@ export class TeamBroker {
     if (call.action === 'bot_reply') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.reply(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
     if (call.action === 'bot_answer') return (this.asks ?? fail(unavailableAssistants)).answer(hostId, call);
     if (call.action === 'bot_told') { const bots = this.bots ?? fail(unavailableAssistants); return this.chained<BotMessageResult>(hostId, call.owner, call.cause, () => bots.told(hostId, call), reason => ({ outcome: 'forbidden', reason })); }
-    if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause);
-      await this.chains.record(chainScope(found.id), { cause: found.cause, bot: bots.callerKey(hostId, call.owner) }, { tokens: call.tokens, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) }); return { chain: found.id }; }
+    if (call.action === 'chain_turn') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause), bot = bots.callerKey(hostId, call.owner);
+      const estimate = estimateCost(call.usage, call.tokens, this.unattended.settings());
+      await this.chains.record(chainScope(found.id), { cause: found.cause, bot }, { tokens: call.tokens, estimatedUsd: estimate.usd, ...(call.costUsd !== undefined ? { costUsd: call.costUsd } : {}) });
+      // What a chain began without the person costs the account's unattended budget; a cap reached tells the person once.
+      if (this.chains.unattended(found.id)) {
+        await this.unattended.record(bot, estimate, call.usage?.model);
+        await this.work?.turnEnded(found.id, { tokens: estimate.tokens || call.tokens, usd: estimate.usd, flags: estimate.flags });
+        const session = this.botSession(bot), day = this.unattended.view().day;
+        if (session) for (const item of this.unattended.tripped()) this.ports.alertChain?.(session, `budget:${item.scope}:${item.period}:${item.period === 'day' ? day : day.slice(0, 7)}`);
+      }
+      return { chain: found.id }; }
+    if (call.action === 'provider_limit') {
+      const bots = this.bots ?? fail(unavailableAssistants), bot = bots.callerKey(hostId, call.owner), provider = `${hostId}/${call.owner.providerId}`;
+      await this.unattended.setLimit(provider, call.resetsAt);
+      const session = this.botSession(bot);
+      if (session) this.ports.alertChain?.(session, `limit:${provider}:${call.resetsAt ?? Math.floor(this.ports.now() / 3_600_000)}`);
+      return { provider };
+    }
     if (call.action === 'chain_approval') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause), bot = bots.callerKey(hostId, call.owner);
       if (!call.grant) return { allowed: await this.chains.covers(found.id, bot, call.cwd) };
       await this.chains.approve(found.id, { cause: found.cause, bot }, call.cwd); return { chain: found.id }; }
-    if (call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).setTimer(hostId, call);
+    if (call.action === 'set_routine') { const bots = this.bots ?? fail(unavailableAssistants), found = this.chains.find(this.ports.read(), { hostId, ...call.owner }, call.cause); return bots.setRoutine(hostId, call, this.chains.unattended(found.id)); }
+    if (call.action === 'list_routines') return (this.bots ?? fail(unavailableAssistants)).listRoutines(hostId, call);
+    if (call.action === 'pause_routine') return (this.bots ?? fail(unavailableAssistants)).pauseRoutine(hostId, call);
+    if (call.action === 'delete_routine') return (this.bots ?? fail(unavailableAssistants)).deleteRoutine(hostId, call);
     if (call.action === 'board') return (this.bots ?? fail(unavailableAssistants)).readBoard(hostId, call);
     if (call.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).updateBoard(hostId, call);
     if (call.action === 'write_page') return (this.bots ?? fail(unavailableAssistants)).writePage(hostId, call);

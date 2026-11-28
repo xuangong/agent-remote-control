@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { Board, BoardItem, BoardItemEdit, BoardPlanEdit, BoardWriteResult, TaskView } from '@orchardworks/agent-remote-protocol';
+import type { Board, BoardItem, BoardItemEdit, BoardPlanEdit, BoardWriteResult, ChainAction, Routine, TaskView, UnattendedView } from '@orchardworks/agent-remote-protocol';
 
 /** One thing the person asked a bot from a conversation (a mention) and what it answered, if it has. */
 export interface AskLine { readonly id: string; readonly botId: string; readonly bot: string; readonly text: string; readonly at: number; readonly answer?: { readonly text: string; readonly at: number } }
@@ -35,6 +35,14 @@ export interface TaskDirectory {
   openBot?(botId: string): void;
   /** The person edits a standing bot's items and plan note; the Relay tells the bots the edit changes, and the answer says what a stale edit overwrote. */
   writeBoard?(botId: string, edit: { items?: readonly BoardItemEdit[]; plan?: BoardPlanEdit }): Promise<BoardWriteResult>;
+  /** A standing bot's routines; absent where routines are unknown. */
+  routinesOf?(botId: string): readonly Routine[] | undefined;
+  /** The account's unattended work as the Relay reports it now (time zone, pause, budget, usage), read when a bot's details are open. */
+  unattendedOf?(): Promise<UnattendedView | undefined>;
+  /** The person changes the account's unattended settings (a bot's own pause, for one); the Relay merges the patch. */
+  setUnattended?(patch: Extract<ChainAction, { action: 'set_unattended' }>['patch']): Promise<void>;
+  /** The person's own routine operations on a standing bot (set, pause, delete, test), then the roster follows. */
+  routineAct?(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' }>): Promise<void>;
   /** Who manages a standing bot now (undefined: the person) and the standing bots it may be moved to. */
   chief?(botId: string): { current?: { botId: string; name: string }; choices: readonly { botId: string; name: string }[] };
   /** The person moves a standing bot to another chief, or to themselves (null); the Relay tells the bots. */

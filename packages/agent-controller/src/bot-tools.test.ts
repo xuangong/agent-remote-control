@@ -59,6 +59,48 @@ it('returns the outcome of a message to the bot as the tool result, whichever of
   expect(calls[0]).toMatchObject({ action: 'bot_message', to: 'Tracker', text: 'Hello.' });
 });
 
+describe('the routine tools', () => {
+  const routineTools = (models?: string[]) => {
+    const calls: TeamHostCall[] = [], tools = new BotTools({ request: async call => { calls.push(call); return { routines: [] }; }, tasks: () => true, ...(models ? { models: async () => models } : {}) });
+    const tool = (name: string) => tools.namespace(() => ref('chief'), false).tools.find(item => item.name === name)!;
+    return { calls, tool };
+  };
+  it('turns each way of saying when into the one schedule the Relay stores, and refuses to guess between them', async () => {
+    const { calls, tool } = routineTools(), set = tool('set_routine');
+    await set.execute({ name: 'A', quiet_minutes: 10, until_minutes: 60 });
+    await set.execute({ name: 'B', every_minutes: 30, prompt: 'Look.', model: 'claude-haiku-4-5', max_runs_per_day: 4 });
+    await set.execute({ name: 'C', daily_at: '08:30' });
+    await set.execute({ name: 'D', weekdays: [1, 2, 3, 4, 5], at: '09:00' });
+    const before = Date.now();
+    await set.execute({ name: 'E', in_minutes: 90 });
+    expect(calls.map(call => (call as { schedule: unknown }).schedule)).toEqual([{ kind: 'quiet', minutes: 10 }, { kind: 'every', minutes: 30 }, { kind: 'daily', time: '08:30' }, { kind: 'weekdays', days: [1, 2, 3, 4, 5], time: '09:00' },
+      { kind: 'once', at: expect.any(Number) }]);
+    expect(((calls[4] as { schedule: { at: number } }).schedule.at)).toBeGreaterThanOrEqual(before + 90 * 60_000);
+    expect(calls[0]).toMatchObject({ action: 'set_routine', untilMinutes: 60 });
+    expect(calls[1]).toMatchObject({ prompt: 'Look.', model: 'claude-haiku-4-5', maxRunsPerDay: 4 });
+    await expect(set.execute({ name: 'F', daily_at: '08:30', every_minutes: 10 })).rejects.toThrow('exactly one');
+    await expect(set.execute({ name: 'G' })).rejects.toThrow('exactly one');
+    await expect(set.execute({ name: 'H', weekdays: [1] })).rejects.toThrow('at');
+    expect(calls).toHaveLength(5);
+  });
+  it('takes a routine\'s model only from the models the provider offers, and says which when it is another', async () => {
+    const { calls, tool } = routineTools(['default', 'sonnet', 'haiku']);
+    await tool('set_routine').execute({ name: 'A', every_minutes: 10, model: 'haiku' });
+    await expect(tool('set_routine').execute({ name: 'B', every_minutes: 10, model: 'claude-haiku-4-5' })).rejects.toThrow('Choose one of: default, sonnet, haiku.');
+    expect(calls).toHaveLength(1);
+    // A provider that lists no models cannot be checked, so the choice stands.
+    const open = routineTools();
+    await open.tool('set_routine').execute({ name: 'C', every_minutes: 10, model: 'anything' });
+    expect(open.calls).toHaveLength(1);
+  });
+  it('lists, pauses and deletes by name, and has no tool to set an event routine', async () => {
+    const { calls, tool } = routineTools();
+    await tool('list_routines').execute({}); await tool('pause_routine').execute({ name: 'A', paused: true }); await tool('delete_routine').execute({ name: 'A' });
+    expect(calls.map(call => call.action)).toEqual(['list_routines', 'pause_routine', 'delete_routine']);
+    expect(JSON.stringify(tool('set_routine'))).not.toContain('event');
+  });
+});
+
 describe('the reply a bot\'s ended turn sends', () => {
   const asked = { kind: 'framed' as const, answers: 'm0123456789ab' };
   const ended = async (turn: Parameters<BotTools['turnEnded']>[1], takesTools = false) => {
@@ -106,10 +148,10 @@ describe('the end of a sub-session\'s turn', () => {
     tools.turnEnded(ref('worker'), turn(undefined, 'interrupted'));
     await flush();
     expect(calls).toEqual([
-      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Two notes written.' },
-      { action: 'sub_turn_end', ...seat, outcome: 'finished', text: `${'x'.repeat(3999)}…` },
-      { action: 'sub_turn_end', ...seat, outcome: 'failed', text: 'The runner is offline.' },
-      { action: 'sub_turn_end', ...seat, outcome: 'interrupted' }]);
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: 'Two notes written.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: `${'x'.repeat(3999)}…` },
+      { action: 'sub_turn_end', ...seat, outcome: 'failed', tokens: 5, text: 'The runner is offline.' },
+      { action: 'sub_turn_end', ...seat, outcome: 'interrupted', tokens: 5 }]);
   });
 
   it('carries the patch of a worktree session after its text, and is sent for no session that is not a sub-session\'s', async () => {
@@ -117,7 +159,7 @@ describe('the end of a sub-session\'s turn', () => {
     tools.turnEnded(ref('worker'), turn('Changed a.txt.'));
     tools.turnEnded(ref('plain'), turn('Done.'));
     await flush();
-    expect(calls).toEqual([{ action: 'sub_turn_end', ...seat, outcome: 'finished', text: 'Changed a.txt.\n\nPatch (apply with git apply): /tmp/x.patch' }]);
+    expect(calls).toEqual([{ action: 'sub_turn_end', ...seat, outcome: 'finished', tokens: 5, text: 'Changed a.txt.\n\nPatch (apply with git apply): /tmp/x.patch' }]);
   });
 
   it('counts only a finished turn in a chain: a failed or interrupted one reports nothing else', async () => {

@@ -96,6 +96,17 @@
 .agent-page-card-header .agent-task-open { flex: none; margin-inline-start: 0; }
 /* The page opens over the conversation, so neither opening it nor a rewrite moves an entry. */
 .agent-page-card-body { position: absolute; inset-inline: 0; top: 100%; z-index: 1; min-width: 0; max-height: 60vh; overflow: auto; overscroll-behavior: contain; padding: var(--orchard-space-s) var(--orchard-space-m); border-radius: var(--orchard-radius-card); background: var(--orchard-surface, Canvas); box-shadow: 0 8px 24px color-mix(in srgb, var(--orchard-text) 16%, transparent); }
+.agent-pinned-lines { position: sticky; top: 0; z-index: 3; display: grid; gap: 1px; margin: 0; }
+.agent-pinned-lines > .agent-page-cards { position: static; }
+.agent-goal-line { display: flex; align-items: center; gap: var(--orchard-space-s); min-width: 0; height: 36px; padding: 0 var(--orchard-space-m); white-space: nowrap; border-radius: var(--orchard-radius-card); background: var(--orchard-surface); box-shadow: inset 0 0 0 1px var(--orchard-separator); }
+.agent-goal-kicker { flex: none; font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }
+.agent-goal-objective { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: var(--orchard-type-headline-weight); color: var(--orchard-text-strong); }
+.agent-goal-status { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }
+.agent-goal-line[data-goal-status="blocked"] .agent-goal-status, .agent-goal-line[data-goal-status="usage_limited"] .agent-goal-status, .agent-goal-line[data-goal-status="budget_limited"] .agent-goal-status { color: var(--orchard-danger-text); }
+.agent-goal-line[data-goal-status="complete"] .agent-goal-objective { color: var(--orchard-text-secondary); }
+.agent-goal-line .agent-task-open { flex: none; margin-inline-start: 0; color: var(--orchard-text-strong); text-decoration: underline; text-underline-offset: 2px; }
+/* A phone keeps the objective and the actions; the figures are in the line's title and the tile's badge. */
+@media (max-width: 520px) { .agent-goal-kicker, .agent-goal-status { display: none; } }
 .agent-task-card { display: grid; gap: var(--orchard-space-xs); }
 .agent-task-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--orchard-space-s); }
 .agent-task-kicker { font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }

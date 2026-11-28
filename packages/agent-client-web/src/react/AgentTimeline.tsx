@@ -27,6 +27,7 @@ import { TurnStatus } from './TurnStatus.js';
 import { AnswerLines } from './items/AnswerLines.js';
 import { SideCards } from './items/SideCards.js';
 import { PageCards } from './items/PageCards.js';
+import { SessionGoalLine } from './items/SessionGoalLine.js';
 import { useTaskDirectory, type SideCard } from './TaskDirectory.js';
 import { dayLineLabel, errorWords, foldTurns, startsDayLine, timelineEntryKey, workDisclosure, type AgentReplicaState, type ProcessMode, type Turn } from '@orchardworks/agent-client';
 
@@ -69,6 +70,8 @@ export interface AgentTimelineProps {
   readonly historyError?: string;
   readonly onLoadOlder?: () => void | Promise<void>;
   readonly onInteractionResponse?: (requestId: string, response: AgentInteractionResponse) => Promise<void>;
+  /** Runs a command of the session on the goal pinned above the conversation (Pause, Resume, Clear goal); absent, the line only reads. */
+  readonly onGoalAction?: (commandId: string, args: string) => Promise<unknown>;
   readonly interactionDisabled?: boolean;
   readonly interactionsWaitingForConnection?: boolean;
   readonly interactionsReadOnly?: boolean;
@@ -104,6 +107,7 @@ export function AgentTimeline({
   historyError,
   onOpenChildSession,
   onInteractionResponse,
+  onGoalAction,
   interactionDisabled = false,
   interactionsWaitingForConnection = false,
   interactionsReadOnly = false,
@@ -277,7 +281,10 @@ export function AgentTimeline({
     || discovered.current.order.get(a.nativeSessionId)! - discovered.current.order.get(b.nativeSessionId)!);
   return <ResourceDownloadContext.Provider value={onDownloadResource}><section className="agent-remote-surface" aria-label={t('timeline.label')}>
 
-    <PageCards pages={pages} />
+    {state.agent?.runtimeInfo.goal
+      // The goal and the team page pin together at the top of the conversation, each in its own line.
+      ? <div className="agent-pinned-lines"><SessionGoalLine goal={state.agent.runtimeInfo.goal} onAction={onGoalAction} /><PageCards pages={pages} /></div>
+      : <PageCards pages={pages} />}
 
     {state.timeline.hasOlder ? <HistoryControls loading={historyLoading} error={historyError}
       key={JSON.stringify([state.agent?.id])}

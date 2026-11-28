@@ -127,6 +127,7 @@ export const ConversationTimeline = memo(function ConversationTimeline({ nativeT
               resolveSessionLink={resolveSessionLink}
               onLoadOlder={actions.loadOlder ? () => scroll.loadOlder(actions.loadOlder!) : undefined}
               onInteractionResponse={actions.respondToInteraction}
+              onGoalAction={!readOnly && sessionStatus === 'ready' ? actions.executeCommand : undefined}
               interactionsReadOnly={readOnly}
               interactionsWaitingForConnection={!readOnly && (sessionStatus !== 'ready' || runtimeMutationDisabled)}
               interactionDisabled={sessionStatus !== 'ready' || runtimeMutationDisabled}

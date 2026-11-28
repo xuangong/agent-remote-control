@@ -85,7 +85,7 @@ export function SessionWorkbench({ assistant, details, conversationTitle: _conve
     <SessionAttributions description={sessionDescription} onNavigate={onNavigateAttribution}>{({ toggle, details: attributionDetails }) => <SessionViewFrame className={layoutClass} nativeSession={nativeSession}>
     <ConversationHeading mode={headingMode} assistant={assistant} conversationPath={conversationPath} sessionManager={sessionManager} headingStart={headingStart} workspaceLink={workspaceLink}
       viewOptions={viewOptions} headingContext={headingContext} attributionToggle={toggle} attributionDetails={attributionDetails} activity={activity} activityLabel={activityLabel}
-      host={host} notice={notice} titled={hasReplica || hasTarget} displayScope={displayScope} tileDetails={tileDetails} searchSlotRef={setHeadingSearchTarget} />
+      host={host} notice={notice} goal={state?.agent?.runtimeInfo.goal} titled={hasReplica || hasTarget} displayScope={displayScope} tileDetails={tileDetails} searchSlotRef={setHeadingSearchTarget} />
     <PreviewDock sessionId={state?.agent?.id ?? attachingAgentId} />
     <OpeningReplyContext.Provider value={detailsHost?.latestReply}><ConversationTimeline toolsTargetRef={setTimelineToolsTarget} toolsCollapsible={headingMode === 'toolbar'} toolsScope={displayScope}
       searchTriggerTarget={headingMode === 'inline' || tileChrome ? headingSearchTarget : assistantChrome ? detailsHost?.tools ?? null : undefined} nativeTakeover={!!nativeTakeover} readOnly={readOnly} state={state} sessionStatus={sessionStatus} attachingAgentId={attachingAgentId}

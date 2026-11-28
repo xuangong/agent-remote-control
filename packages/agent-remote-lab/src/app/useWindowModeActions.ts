@@ -7,6 +7,8 @@ import { botPlaceForTile, windowRouteForPin, type WorkbenchMode } from '../kerne
 import { rankInPlace } from '../kernel/assistant-groups.js';
 import { windowBindingKey } from '../kernel/window-composition.js';
 import { windowCatalog } from '../features/windows/useWindowActions.js';
+import { bindWorkbench, resolveWorkbench, standingBots, unbindWorkbench } from '../features/windows/bot-workbench-binding.js';
+import { byRecentUse } from '../features/windows/window-recency.js';
 import { attributionWindowOperation } from '../features/sessions/session-attribution-navigation.js';
 import type { SessionAttribution } from '@orchardworks/agent-client';
 import { useRef } from 'react';
@@ -29,8 +31,8 @@ import type { SharedFeedsSlice } from './useSharedFeeds.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
 import type { AppInputs } from './types.js';
 
-export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'windowActions' | 'windowWorkspace'>) {
-  const { addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, windowActions, windowWorkspace } = scope;
+export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBindingSlice & SessionOpeningSlice & ViewSessionStateSlice & PanelsAndShortcutsSlice & ActiveSessionSlice & DocksAndBotSelectionSlice & WindowViewActionsSlice & WorkbenchShellSlice & ProviderStateSlice & SharedFeedsSlice & WorkbenchRecordsSlice, 'addSessionView' | 'askView' | 'baseUrl' | 'closeContext' | 'closeInspector' | 'closePage' | 'compactLayout' | 'createWindowFromMenu' | 'expandedKeys' | 'modeSteps' | 'navigation' | 'openDirectorySession' | 'openSession' | 'presentedViewId' | 'setQueuedModeSteps' | 'sharedViewForSlot' | 'sharedWindow' | 'showView' | 'sideRequests' | 'succession' | 'teamRoster' | 'windowActions' | 'windowWorkspace' | 'assistantNames'>) {
+  const { assistantNames, addSessionView, askView, baseUrl, closeContext, closeInspector, closePage, compactLayout, createWindowFromMenu, expandedKeys, modeSteps, navigation, openDirectorySession, openSession, presentedViewId, setQueuedModeSteps, sharedViewForSlot, sharedWindow, showView, sideRequests, succession, teamRoster, windowActions, windowWorkspace } = scope;
   const t = useTranslate();
 
   function isViewVisible(slotId: string) {
@@ -169,6 +171,42 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     });
   }
 
+  /**
+   * Opens a bot's workbench in Window mode: the one this device used last, else a new one made for it. Creation is lazy, so a
+   * bot with a staff of twelve does not leave twelve Windows behind.
+   */
+  async function openWorkbench(botId: string): Promise<void> {
+    const groups = windowWorkspace.groups;
+    let id = resolveWorkbench(groups, botId, byRecentUse(baseUrl, groups.map(group => group.window)).map(window => window.id))?.window.id;
+    try {
+      if (!id) {
+        const bot = standingBots(groups).find(item => item.botId === botId);
+        if (!bot) throw keyedError('windows.error.botGone');
+        id = await windowWorkspace.createBotWorkbench(botId, assistantNames.view(bot.groupId, bot.viewId), bot.binding);
+      }
+      await windowWorkspace.open(id);
+    } catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notOpened')); return; }
+    closeContext();
+    navigation.setMode('window', { window: id });
+    inMode('window', () => searchRuns.current.focusShownMode('window'));
+  }
+
+  /** Binds the open Window to a bot: its main session becomes the first tile; the Window's own tiles stay. */
+  async function bindWorkbenchToBot(botId: string): Promise<void> {
+    const open = windowWorkspace.readWindow(), bot = standingBots(windowWorkspace.groups).find(item => item.botId === botId);
+    if (!open || !bot) return;
+    try { await windowWorkspace.operate({ type: 'layout.apply', layout: bindWorkbench(open, botId, bot.binding) }); }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notChanged')); }
+  }
+
+  /** Unbinds the open Window: it becomes a free workbench and keeps its tiles. */
+  async function unbindWorkbenchFromBot(): Promise<void> {
+    const open = windowWorkspace.readWindow();
+    if (!open) return;
+    try { await windowWorkspace.operate({ type: 'layout.apply', layout: unbindWorkbench(open, []) }); }
+    catch (error) { windowActions.setNotice(errorWords(error, t, 'workbench.notice.notChanged')); }
+  }
+
   async function navigateAttribution(attribution: SessionAttribution): Promise<void> {
     const target = attribution.target;
     if (!target) return;
@@ -203,7 +241,7 @@ export function useWindowModeActions(scope: Pick<AppInputs & SessionSuccessionBi
     sideRequests.current.set(key, request);
     return request;
   }
-  return { isViewVisible, currentBotSession, earlierBotSessions, inMode, searchRuns, switchMode, navigateAttribution, sideRequestKey, nextSideRequest, openInBotMode, pinToWindow };
+  return { isViewVisible, currentBotSession, earlierBotSessions, inMode, searchRuns, switchMode, navigateAttribution, sideRequestKey, nextSideRequest, openInBotMode, pinToWindow, openWorkbench, bindWorkbenchToBot, unbindWorkbenchFromBot };
 }
 
 export type WindowModeActionsSlice = ReturnType<typeof useWindowModeActions>;

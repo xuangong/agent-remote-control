@@ -226,3 +226,17 @@ it('opens a deep link in a Window of its own when the Window with bot details wo
   await vi.waitFor(async () => { await act(async () => {}); const window = read().window; expect(window?.views.find(view => view.id === window.selectedViewId)?.binding?.nativeSessionId).toBe('target'); });
   expect(create).toHaveBeenCalledTimes(1); expect(read().window?.id).not.toBe('bots'); expect(backend.groups.get('bots')?.window.views).toHaveLength(2); expect(read().error).toBeUndefined();
 });
+it('starts a bot workbench shown in Window mode only, with a deterministic id, and leaves the open Window alone', async () => {
+  const backend = server(group('a')); history.replaceState(null, '', '/?window=a'); const { read } = await mount('https://workbench/', true);
+  vi.spyOn(WindowWorkspaceClient.prototype, 'createGroup').mockImplementation(async created => { backend.groups.set(created.window.id, created); return created; });
+  await vi.waitFor(async () => { await act(async () => {}); expect(read().window?.id).toBe('a'); }, { timeout: 3000, interval: 5 });
+  const before = read().window;
+  let id = '';
+  await act(async () => { id = await read().createBotWorkbench('bot_1', 'Dango', { hostId: 'h', providerId: 'p', nativeSessionId: 'main', title: 'Dango' }); });
+  const made = read().readGroup(id)!;
+  expect(id).toBe('wb-bot_1');
+  expect(made.presentation).toEqual({ bots: false });
+  expect(made.bots).toBeUndefined();
+  expect(made.window.views[0]).toMatchObject({ feature: { kind: 'bot', id: 'bot_1' }, bindingPolicy: 'managed', placement: 'primary' });
+  expect(read().window).toEqual(before);
+});

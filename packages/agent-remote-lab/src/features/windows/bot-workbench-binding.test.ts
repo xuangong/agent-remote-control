@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { applyGroupOperation, createWindowView, isWorkspaceWindow, type WindowGroup, type WindowSessionBinding, type WindowView, type WorkspaceWindow } from '@orchardworks/agent-remote-protocol';
-import { adoptedView, bindWorkbench, rebindWorkbenchMain, resolveWorkbench, unbindWorkbench, workbenchGroup, workbenchWindowId } from './bot-workbench-binding.js';
+import { adoptedView, bindWorkbench, resolveWorkbench, standingBots, unbindWorkbench, workbenchGroup, workbenchWindowId } from './bot-workbench-binding.js';
 import { workbenchBotId } from './bot-workbench.js';
 import type { WorkbenchTile } from './bot-workbench.js';
 
@@ -53,12 +53,6 @@ describe('binding and unbinding', () => {
     const tile: WorkbenchTile = { id: 'sub:s_1', source: 'derived', title: 'R', folded: true, taskId: 's_1', locator: { hostId: 'local', providerId: 'claude', nativeSessionId: 'n1' } };
     expect(adoptedView(tile, 'v')).toMatchObject({ collapsed: true });
   });
-  it('rebinds the main tile when the bot\'s main session changes, and only then', () => {
-    const group = workbenchGroup('b1', 'Dango', binding('main-1'), 'wb-b1');
-    expect(rebindWorkbenchMain(group.window, binding('main-1'))).toBeUndefined();
-    const layout = rebindWorkbenchMain(group.window, binding('main-2'))!;
-    expect(apply(group.window, layout).views[0]!.binding?.nativeSessionId).toBe('main-2');
-  });
 });
 
 describe('opening a bot\'s workbench', () => {
@@ -68,5 +62,14 @@ describe('opening a bot\'s workbench', () => {
     expect(resolveWorkbench(groups, 'b1', ['w2', 'w1'])?.window.id).toBe('w2');
     expect(resolveWorkbench(groups, 'b1', [])?.window.id).toBe('w1');
     expect(resolveWorkbench(groups, 'b9', [])).toBeUndefined();
+  });
+});
+
+describe('standing bots', () => {
+  it('lists the bots of groups with bot details, with their chief, and skips plain Windows', () => {
+    const section: WindowGroup = { window: free([createWindowView('main', binding('m1'), 'primary'), createWindowView('v2', binding('m2'), 'primary')]),
+      bots: { rank: 'm', members: { main: { botId: 'b1' }, v2: { botId: 'b2', chief: 'b1', hidden: true } } } };
+    const plain: WindowGroup = { window: { ...free([createWindowView('a', binding('x'), 'primary')]), id: 'p' } };
+    expect(standingBots([plain, section]).map(bot => [bot.botId, bot.chief, bot.binding.nativeSessionId])).toEqual([['b1', undefined, 'm1'], ['b2', 'b1', 'm2']]);
   });
 });

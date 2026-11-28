@@ -1,0 +1,6 @@
+/* The choices around bot workbenches, and the bot workbench's own surfaces. */
+.lab-workbench-kind { display: grid; gap: var(--orchard-space-s); padding: var(--orchard-space-m) 0; }
+.lab-workbench-kind > h3 { margin: 0; font: var(--orchard-type-footnote-weight) var(--orchard-type-footnote-size) / 1.4 var(--orchard-font-text); color: var(--orchard-text-secondary); }
+.lab-workbench-kind > p { margin: 0; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
+.lab-workbench-choices { display: grid; gap: var(--orchard-space-xs); margin: 0; padding: 0; list-style: none; }
+.lab-workbench-choices button { width: 100%; justify-content: flex-start; }

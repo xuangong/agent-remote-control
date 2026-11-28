@@ -1,3 +1,4 @@
+import { workbenchGroup, workbenchWindowId } from './bot-workbench-binding.js';
 import { createWindowSessionBridge, resolveCompositionWindowViewId } from '../../kernel/window-composition.js';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { errorWords, keyedError, WindowMutationUnknownError, WindowRequestError, WindowWorkspaceClient, type WindowOperationIdentity, type WindowSnapshot } from '@orchardworks/agent-client';
@@ -664,6 +665,12 @@ export function useWindowWorkspace(scope: string, hosted: boolean, enabled: bool
         window: { ...emptyWindow(), title: binding.title || 'New session', views: [createWindowView(viewId, binding, 'primary')], selectedPrimaryViewId: viewId, selectedViewId: viewId },
         bots: { rank: appendedRank(catalog.groups), members: { [viewId]: { picture: newAssistantPicture(viewId, catalog.groups), ...(name ? { name } : {}) } } } }));
       return { groupId, viewId };
+    },
+    /** Starts a bot workbench: a Window for the bot, shown in Window mode only, holding the bot's main session as its tagged main tile. */
+    async createBotWorkbench(botId: string, name: string, main: WindowSessionBinding): Promise<string> {
+      if (pendingSection()) throw keyedError('windows.error.unconfirmedGroup');
+      const taken = new Set(catalog.groups.map(group => group.window.id));
+      return createSectionRequest(undefined, false, () => workbenchGroup(botId, name, main, workbenchWindowId(botId, taken)));
     },
     /** Creates an empty group with this name, listed after the others. */
     async createGroup(title: string): Promise<string> {

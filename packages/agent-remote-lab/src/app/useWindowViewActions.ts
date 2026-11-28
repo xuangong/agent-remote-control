@@ -5,7 +5,7 @@ import { paneDraftOwners } from '../state/draft-ownership.js';
 import type { SessionPanel } from '../features/windows/panels.js';
 import { windowPrimaryViewId, type Team } from '@orchardworks/agent-remote-protocol';
 import { sessionConnectionFailure } from '../kernel/SessionConnectionNotice.js';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { RemoteHost } from '../kernel/remote-host.js';
 import type { RemoteHostStateSlice } from './useRemoteHostState.js';
 import type { WorkbenchRecordsSlice } from './useWorkbenchRecords.js';
@@ -66,7 +66,13 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
   /** Shows the new-session form. */
   function openNewSessionPanel() { showPanel('new'); }
 
-  function createWindowFromMenu() {
+  /** The choice around bot workbenches that is open: a new workbench, binding this one to a bot, or unbinding it. */
+  const [workbenchSheet, setWorkbenchSheet] = useState<'new' | 'bind' | 'unbind'>();
+
+  /** Every way to start a Window asks what kind it is: free, or a bot's workbench. */
+  function createWindowFromMenu() { setWorkbenchSheet('new'); }
+
+  function createFreeWindow() {
     if (creatingWindowRef.current) return;
     creatingWindowRef.current = true; setCreatingWindow(true);
     void windowWorkspace.create().then(() => toast?.dismiss('new-window'),
@@ -114,7 +120,7 @@ export function useWindowViewActions(scope: Pick<AppInputs & RemoteHostStateSlic
     if (view.bindingPolicy === 'managed') throw keyedError('windows.error.managedView');
     return { windowId: current.id, viewId: view.id, binding: JSON.stringify(view.binding ?? null) };
   }
-  return { selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };
+  return { workbenchSheet, setWorkbenchSheet, createFreeWindow, selectHost, selectProvider, focusManagedWindow, showWindowSessionChooser, chooseWindowSession, openPage, showPanel, openNewSessionPanel, createWindowFromMenu, editWindow, selectPrimaryGroup, createSessionView, addSessionView, windowToolbarShown, windowDraftBinding, directoryDestination };
 }
 
 export type WindowViewActionsSlice = ReturnType<typeof useWindowViewActions>;

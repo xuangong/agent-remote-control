@@ -45,16 +45,20 @@ export function unbindWorkbench(window: WorkspaceWindow, keep: readonly Workbenc
   return layoutOf(window, [...views, ...adopted]);
 }
 
-/** The layout that points the main tile at the bot's current main session, or nothing when it already does. */
-export function rebindWorkbenchMain(window: WorkspaceWindow, main: WindowSessionBinding): WindowLayout | undefined {
-  const view = workbenchMainView(window);
-  if (!view || !workbenchBotId(window) || sameSession(view.binding, main)) return undefined;
-  return layoutOf(window, window.views.map(item => item === view ? { ...item, binding: main } : item));
-}
-
 /** The bot's workbench to open: the most recently used one of this device, else the first in catalog order. */
 export function resolveWorkbench(groups: readonly WindowGroup[], botId: string, recent: readonly string[]): WindowGroup | undefined {
   const own = groups.filter(group => workbenchBotId(group.window) === botId);
   const rank = (id: string) => { const index = recent.indexOf(id); return index < 0 ? Infinity : index; };
   return [...own].sort((a, b) => rank(a.window.id) - rank(b.window.id))[0];
+}
+
+/** A standing bot as a workbench needs it: its record id, where its conversation is, and the session it started in. */
+export interface StandingBot { readonly botId: string; readonly groupId: string; readonly viewId: string; readonly binding: WindowSessionBinding; readonly chief?: string }
+
+/** Every standing bot of the groups with bot details, in catalog order; a bot hidden in Bot mode is still a bot. */
+export function standingBots(groups: readonly WindowGroup[]): StandingBot[] {
+  return groups.flatMap(group => group.window.views.flatMap(view => {
+    const details = group.bots?.members[view.id];
+    return details?.botId && view.binding ? [{ botId: details.botId, groupId: group.window.id, viewId: view.id, binding: view.binding, ...(details.chief ? { chief: details.chief } : {}) }] : [];
+  }));
 }

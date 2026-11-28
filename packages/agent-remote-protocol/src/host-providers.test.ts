@@ -28,3 +28,9 @@ it('accepts session references from Controllers that declare them, read with GET
     expect(decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
   }
 });
+
+it('accepts the Relay asking a Host which models a session\'s provider offers as a POST with a body, and refuses it as a read (the Host closes the connection on a frame the protocol does not allow)', () => {
+  const frame = { uplinkVersion: 2, type: 'rpc_request', requestId: 'r', method: 'POST', path: '/remote/team/session-models', body: '{"providerId":"claude","nativeSessionId":"n"}' };
+  expect(decodeRemoteHostUplinkMessage(JSON.stringify(frame)).status).toBe('ok');
+  for (const invalid of [{ ...frame, method: 'GET', body: undefined }, { ...frame, body: undefined }, { ...frame, sessionId: 'session' }]) expect(decodeRemoteHostUplinkMessage(JSON.stringify(invalid)).status).toBe('rejected');
+});

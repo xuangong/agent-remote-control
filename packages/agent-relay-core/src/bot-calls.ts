@@ -334,11 +334,17 @@ export class BotCalls {
     return { botId, primary };
   }
   /** The person's own routines of a standing bot: the same operations a bot has, by the person, and Test. */
-  async personRoutine(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' }>) {
+  async personRoutine(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' | 'routine_rotate_hook' }>) {
     const bot = accountDirectory(this.ports.groups()).find(item => item.key === action.botId && item.key.startsWith('b_')) ?? fail('No standing bot of this account has that id.');
     if (action.action === 'routine_pause') return this.work.pause(bot, action.name, action.paused);
     if (action.action === 'routine_delete') return this.work.delete(bot, action.name);
     if (action.action === 'routine_test') return this.work.test(bot, action.name);
+    if (action.action === 'routine_rotate_hook') return this.work.rotateHook(bot, action.name);
+    // The model is one the bot's provider offers, as for the bot's own tool; a Host that cannot list them leaves the choice standing.
+    if (action.model !== undefined) {
+      const offered = await this.ports.models?.(bot.hostId, bot.providerId, bot.nativeSessionId).catch(() => undefined);
+      if (offered?.length && !offered.includes(action.model)) fail(`"${action.model}" is not a model this provider offers. Choose one of: ${offered.join(', ')}.`);
+    }
     const { botId: _bot, action: _action, ...spec } = action;
     return this.work.setRoutine(bot, spec as RoutineSpec, 'person');
   }

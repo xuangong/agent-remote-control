@@ -9,7 +9,7 @@ const routine = (extra: Partial<Routine> = {}): Routine => ({ id: 'r1', name: 'M
   runs: [{ n: 1, trigger: 'schedule', dueAt: T - 86_400_000, state: 'done', usd: 0.0421 }, { n: 2, trigger: 'schedule', dueAt: T - 3_600_000, state: 'skipped', reason: 'budget' }], ...extra });
 function choice(routines: Routine[], extra: Partial<RoutinesChoice> = {}) {
   const saved: RoutineSpec[] = [], paused: Array<[string, boolean]> = [], removed: string[] = [], tested: string[] = [];
-  const value: RoutinesChoice = { routines, zone: 'UTC', save: async spec => { saved.push(spec); }, pause: async (name, flag) => { paused.push([name, flag]); }, remove: async name => { removed.push(name); }, test: async name => { tested.push(name); }, ...extra };
+  const value: RoutinesChoice = { routines, zone: 'UTC', save: async spec => { saved.push(spec); return undefined; }, pause: async (name, flag) => { paused.push([name, flag]); }, remove: async name => { removed.push(name); }, test: async name => { tested.push(name); }, ...extra };
   return { value, saved, paused, removed, tested };
 }
 const click = (element: Element | null | undefined) => act(async () => { (element as HTMLElement).click(); });
@@ -93,6 +93,62 @@ describe('a bot\'s model and pause in the routines', () => {
     await click(container.querySelector('[role="switch"], input[type="checkbox"]'));
     expect(calls).toEqual([true]);
     expect(container.textContent).toContain('Pause this bot\'s unattended work');
+  });
+});
+
+describe('creating every kind of routine from the form', () => {
+  const hookUrl = (token: string) => `https://relay.test/hooks/ns/${token}`;
+  it('makes each schedule kind: every, daily, weekdays, once, quiet and a webhook, with its own fields', async () => {
+    const c = choice([], { hookUrl });
+    const container = await render(<RoutinesList choice={c.value} />);
+    const make = async (name: string, kind: string, fill: (form: HTMLFormElement, field: (label: string) => HTMLInputElement) => Promise<void>) => {
+      await click(button(container, 'New routine'));
+      const form = container.querySelector('form')!;
+      const field = (label: string) => [...form.querySelectorAll('label')].find(item => item.textContent!.startsWith(label))!.querySelector('input, select, textarea') as HTMLInputElement;
+      await type(field('Name'), name); await type(field('When') as unknown as HTMLSelectElement, kind);
+      await fill(form, field);
+      await click(button(form, 'Save'));
+    };
+    await make('A', 'every', async (_, field) => { await type(field('Minutes'), '15'); });
+    await make('B', 'daily', async (_, field) => { await type(field('Time'), '07:30'); });
+    await make('C', 'weekdays', async (_, field) => { await type(field('Time'), '18:00'); });
+    await make('D', 'once', async (_, field) => { await type(field('Date and time'), '2026-12-24T10:00'); });
+    await make('E', 'quiet', async (_, field) => { await type(field('Minutes'), '45'); });
+    await make('F', 'event', async () => {});
+    expect(c.saved.map(spec => spec.schedule)).toEqual([{ kind: 'every', minutes: 15 }, { kind: 'daily', time: '07:30' }, { kind: 'weekdays', days: [1, 2, 3, 4, 5], time: '18:00' },
+      { kind: 'once', at: Date.parse('2026-12-24T10:00:00Z') }, { kind: 'quiet', minutes: 45 }, { kind: 'event' }]);
+  });
+  it('offers the webhook only where the Relay has a public address, warns before saving one, and lets the person allow changes', async () => {
+    const without = await render(<RoutinesList choice={choice([]).value} />);
+    await click(button(without, 'New routine'));
+    expect([...without.querySelectorAll('form select option')].map(option => option.textContent)).not.toContain('When a webhook is called');
+    const c = choice([], { hookUrl: token => `https://relay.test/hooks/ns/${token}` });
+    const container = await render(<RoutinesList choice={c.value} />);
+    await click(button(container, 'New routine'));
+    const form = container.querySelector('form')!;
+    const when = [...form.querySelectorAll('label')].find(item => item.textContent!.startsWith('When'))!.querySelector('select') as HTMLSelectElement;
+    await type(when, 'event');
+    expect(form.querySelector('[role="note"]')!.textContent).toContain('full permissions');
+    expect(form.querySelector('[role="note"]')!.textContent).toContain('read-only');
+    await type([...form.querySelectorAll('label')].find(item => item.textContent!.startsWith('Name'))!.querySelector('input')!, 'Deploy failed');
+    await click([...form.querySelectorAll('label')].find(item => item.textContent!.includes('change files'))!.querySelector('input'));
+    await click(button(form, 'Save'));
+    expect(c.saved).toEqual([{ name: 'Deploy failed', schedule: { kind: 'event' }, workspace: 'same' }]);
+  });
+  it('shows a new webhook address once with Copy, and a new one after Rotate, and says how many events wait', async () => {
+    const written: string[] = [];
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => { written.push(text); } } });
+    const hook = routine({ id: 'h', name: 'Deploy failed', schedule: { kind: 'event' }, events: ['a', 'b'], runs: [] });
+    const c = choice([hook], { hookUrl: token => `https://relay.test/hooks/ns/${token}`, rotateHook: async () => ({ token: 'abc.def' }) });
+    const container = await render(<RoutinesList choice={c.value} />);
+    expect(container.textContent).toContain('Anyone with its address can start this');
+    expect(container.textContent).toContain('2 events waiting');
+    expect(container.querySelector('.lab-routine-address')).toBeNull();
+    await click(button(container, 'New address'));
+    expect(container.querySelector('.lab-routine-address code')!.textContent).toBe('https://relay.test/hooks/ns/abc.def');
+    await click(button(container.querySelector('.lab-routine-address')!, 'Copy address'));
+    expect(written).toEqual(['https://relay.test/hooks/ns/abc.def']);
+    expect(container.querySelector('.lab-routine-address')!.textContent).toContain('Copied');
   });
 });
 

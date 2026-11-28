@@ -84,8 +84,16 @@ export class TeamBroker {
       this.work = new BotRoutines(lent, this.inboxes, this.chains, { zone: () => this.unattended.zone(),
         refuse: (inbox, routine, now) => this.unattended.refuse(inbox.inbox!.botId, `${inbox.members[0]!.hostId}/${inbox.members[0]!.providerId}`, routine, now),
         started: bot => this.unattended.countRun(bot),
-        startSub: async start => { await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
-          name: start.name.slice(0, 120), prompt: start.prompt, model: start.model }); } });
+        startSub: async start => { const created = await (this.tasks ?? fail(unavailableTasks)).create(start.hostId, { owner: { providerId: start.providerId, nativeSessionId: start.nativeSessionId, title: start.title }, operationId: start.operationId,
+          name: start.name.slice(0, 120), prompt: start.prompt, ...(start.model ? { model: start.model } : {}), ...(start.workspace ? { workspace: start.workspace } : {}) });
+          // A session that could not be created (a provider that cannot run read only, say) fails the run with the Host's reason, and the sub-session ends.
+          const team = this.ports.read().find(item => item.id === created.taskId), seat = team?.members[0];
+          if (team && seat && (seat.creation === 'unknown' || seat.creation === 'abandoned')) {
+            const reason = (seat as { error?: string }).error ?? 'The sub-session could not be created.';
+            await this.change(teams => { const own = find(teams, team.id); if (own.task?.state !== 'ended') taskAction(own, this.ports.now(), 'person'); }).catch(() => undefined);
+            throw new Error(reason);
+          }
+        } });
       this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
       if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, new BotPages(lent, this.inboxes), ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
@@ -165,6 +173,8 @@ export class TeamBroker {
   }
   /** The routines of a standing bot as they stand now. */
   routines(botKey: string): Routine[] { return this.work?.list(botKey) ?? []; }
+  /** A webhook call (the public address of an event routine): accepted, or unknown when the token names no routine or its secret is wrong. */
+  async fireHook(token: string, payload: string) { return (this.work ?? fail(unavailableAssistants)).receive(token, payload); }
   /** The person runs a routine of a bot now. */
   routineTest(botKey: string, name: string) { return (this.bots ?? fail(unavailableAssistants)).personRoutine({ action: 'routine_test', botId: botKey, name }); }
   /** The account's chains, newest first, and the names of the bots they name. */
@@ -202,7 +212,7 @@ export class TeamBroker {
       try { return await inChain(scope, () => bots.personUpdateBoard(action.botId, action.items, action.plan)); }
       finally { await this.chains.record(scope, { cause: 'person', bot: action.botId }).catch(() => undefined); }
     }
-    if (action.action === 'routine_set' || action.action === 'routine_pause' || action.action === 'routine_delete' || action.action === 'routine_test') return (this.bots ?? fail(unavailableAssistants)).personRoutine(action);
+    if (action.action === 'routine_set' || action.action === 'routine_pause' || action.action === 'routine_delete' || action.action === 'routine_test' || action.action === 'routine_rotate_hook') return (this.bots ?? fail(unavailableAssistants)).personRoutine(action);
     if (action.action === 'set_unattended') return this.unattended.patch(action.patch);
     if (action.action === 'set_primary') return (this.bots ?? fail(unavailableAssistants)).personSetPrimary(action.botId, action.primary);
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);

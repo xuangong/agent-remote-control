@@ -18,6 +18,8 @@ test('reads each routine as schedule, next run, who set it and its last run, and
   await expect(row('Morning check')).toContainText('Model claude-haiku-4-5');
   await expect(row('Morning check')).toContainText('2 missed runs included');
   await expect(row('Weekly summary')).toContainText('Paused');
+  await expect(row('Deploy failed')).toContainText('2 events waiting');
+  await expect(row('Deploy failed')).toContainText('Anyone with its address can start this');
   await expect(row('work')).toContainText('Automatic, while it has open work');
   await expect(row('work').getByRole('button', { name: 'Delete', exact: true })).toHaveCount(0);
   await expect(routines.locator('li[data-routine^="Look at the failing build"]')).toContainText('skipped: over budget');
@@ -52,6 +54,29 @@ test('makes a routine from the form with native fields, from the keyboard, and s
   await form.getByLabel('Name').press('Enter');
   await expect(routines.locator('li[data-routine="Standup"]')).toContainText('Every day at 09:15');
   expect(await actions(page)).toEqual([{ save: { name: 'Standup', schedule: { kind: 'daily', time: '09:15' }, prompt: 'Summarise yesterday.', model: 'haiku' } }]);
+});
+
+test('makes a webhook routine with a warning, shows its address once with Copy, and replaces it from the row', async ({ page }, testInfo) => {
+  await page.goto('/e2e/fixtures/routines.html?empty');
+  const routines = page.getByRole('main', { name: 'Routines' });
+  await routines.getByRole('button', { name: 'New routine', exact: true }).click();
+  const form = routines.getByRole('form', { name: 'New routine' });
+  await expect(form.getByLabel('When').locator('option')).toHaveText(['Every few minutes', 'Every day', 'On days', 'Once', 'After quiet', 'When a webhook is called']);
+  await form.getByLabel('Name').fill('Deploy failed');
+  await form.getByLabel('When').selectOption('event');
+  await expect(form.getByRole('note')).toContainText('full permissions');
+  expect(await fitsWidth(page)).toBe(true);
+  await form.getByLabel('What to do').fill('Triage it.');
+  await form.getByRole('button', { name: 'Save', exact: true }).click();
+  const row = routines.locator('li[data-routine="Deploy failed"]');
+  await expect(row).toContainText('When its webhook is called');
+  await expect(row).toContainText('read-only');
+  await expect(row.getByRole('group', { name: 'Webhook address' })).toContainText('https://relay.example/hooks/ns/abc123abc123.' + 'y'.repeat(43));
+  expect(await fitsWidth(page)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath('webhook.png'), fullPage: true });
+  await row.getByRole('button', { name: 'New address', exact: true }).click();
+  await expect(row.getByRole('group', { name: 'Webhook address' })).toContainText('x'.repeat(43));
+  expect((await actions(page)).length).toBe(2);
 });
 
 test('shows the budget, what was used, the cap reached and the provider window, and saves the caps', async ({ page }, testInfo) => {

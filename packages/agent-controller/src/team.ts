@@ -260,6 +260,11 @@ export class TeamRuntime implements SessionRole {
     await mkdir(directory, { recursive: true }); await writeFile(file, patch);
     return `Patch of the worktree's changes against ${workspace.commit.slice(0, 12)} (apply with git apply): ${file}`;
   }
+  /** The models a session's provider offers (its model setting), as a routine's model is chosen from. */
+  async sessionModels(ref: { providerId: string; nativeSessionId: string }): Promise<string[] | undefined> {
+    const lease = await this.access.acquire(ref.providerId, ref.nativeSessionId);
+    try { return lease.agent.snapshot().payload.runtimeInfo.settings?.find(setting => setting.id === 'model' && setting.category === 'model')?.options.map(option => option.value); } finally { lease.release(); }
+  }
   /** The patch line of the worktree bot whose session this is; undefined for any other session. */
   async patchFor(ref: NativeSessionRef): Promise<string | undefined> {
     const record = this.records.find(item => item.seat.task && item.seat.member.role === 'leader' && item.seat.member.workspace?.kind === 'worktree'

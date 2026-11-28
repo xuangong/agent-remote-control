@@ -420,6 +420,8 @@ export function createHostBroker(options: HostBrokerOptions) {
     },
     handlesRequest,
     handlesUpgrade,
+    /** A webhook call to an event routine's public address; see `TeamBroker.fireHook`. */
+    fireHook: (token: string, payload: string) => teams.fireHook(token, payload),
     async handleRequest(request: Request, context: BrokerRequestContext = {}): Promise<Response | undefined> {
       const url = new URL(request.url);
       if (!handlesRequest(url)) return undefined;

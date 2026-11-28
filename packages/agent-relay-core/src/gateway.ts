@@ -17,7 +17,7 @@ import { createRelayPush } from './push/relay-push.js';
 import type { PushConfiguration } from './push/push-config.js';
 import type { ReminderState } from './push/push-reminders.js';
 import { PROTOCOL_VERSION, encodeSessionChannelServerMessage, SESSION_STATE_LIMIT, type SessionChannelServerMessage, type SessionStateHost, type SessionStateRef, type SessionStateUpdate } from '@orchardworks/agent-remote-protocol';
-import { acceptSessionChannel, createWindowView } from '@orchardworks/agent-remote-protocol';
+import { acceptSessionChannel, createWindowView, HOOK_BODY_LIMIT, HOOK_CALLS_PER_HOUR } from '@orchardworks/agent-remote-protocol';
 import { createSessionStars, StarError } from './session-stars.js';
 import { sessionSubscriptionRefusal, unavailableRoute } from '@orchardworks/agent-remote-protocol/model';
 import { createSecurityPolicy } from './security.js';
@@ -582,11 +582,33 @@ export function createHostedRelay(options: HostedRelayOptions) {
     response.headers.append('set-cookie', `${gatewayCookieName(auth.origin, 'login', auth.cookiePrefix)}=; ${cookieFlags}; Max-Age=0`);
     return response;
   }
+  /**
+   * A webhook call: public, owned by the routine's secret and not by a sign-in. It takes a small JSON or plain text body, answers 404 for any address
+   * that is not a routine's (so addresses cannot be probed), and limits calls by caller and by address.
+   */
+  async function handleHook(request: Request, namespace: string, token: string): Promise<Response> {
+    if (request.method !== 'POST') return new Response(null, { status: 405, headers: { allow: 'POST' } });
+    if (!security.allow('hook-caller:' + (options.clientAddress?.(request) ?? 'unknown'), 120, 60_000) || !security.allow('hook:global', 3000, 60_000)) return json(429, { error: 'Too many webhook calls.' });
+    const type = request.headers.get('content-type')?.split(';')[0]?.trim().toLowerCase();
+    if (type !== undefined && type !== 'application/json' && type !== 'text/plain') return json(415, { error: 'Send JSON or plain text.' });
+    if (Number(request.headers.get('content-length') ?? 0) > HOOK_BODY_LIMIT) return json(413, { error: 'The body is too large.' });
+    const body = await request.text();
+    if (Buffer.byteLength(body) > HOOK_BODY_LIMIT) return json(413, { error: 'The body is too large.' });
+    const owned = tenants.get(namespace);
+    if (!owned || await activeOwner(owned) !== 'active') return json(404, { error: 'No such webhook.' });
+    // An address is limited by its own count, so one noisy sender cannot spend the account's routines.
+    if (!security.allow('hook:' + token.split('.')[0], HOOK_CALLS_PER_HOUR, 3_600_000)) return json(429, { error: 'Too many calls to this webhook.' });
+    const result = await owned.broker.fireHook(token, body).catch(() => undefined);
+    if (!result || result.status === 'unknown') return json(404, { error: 'No such webhook.' });
+    return json(202, { accepted: result.queued, ...(result.reason ? { reason: result.reason } : {}) });
+  }
   async function handle(request: Request): Promise<Response | undefined> {
     const url = new URL(request.url);
     if (isPreviewRequest(url)) return handlePreview(request);
     if (url.origin !== auth.origin) return json(403, { error: 'Origin is not allowed.' });
     if (auth.provider === 'google' && ['/v1/remote/host/bootstrap', '/gateway/control', '/auth/session'].includes(url.pathname)) return json(404, { error: 'This authentication capability is unavailable.' });
+    const hook = /^\/hooks\/([A-Za-z0-9_-]{1,64})\/([0-9a-f]{12}\.[A-Za-z0-9_-]{43})$/.exec(url.pathname);
+    if (hook) return handleHook(request, hook[1]!, hook[2]!);
     if (url.pathname === '/v1/remote/host/bootstrap') return bootstrapHost(request, url);
     if (url.pathname === '/_arc/preview-authorize' && subdomainAccess) {
       if (request.method !== 'POST' || !originAllowed(request)) return json(403, {});

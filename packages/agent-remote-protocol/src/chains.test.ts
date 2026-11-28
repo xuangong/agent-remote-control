@@ -21,3 +21,21 @@ describe('standing approvals of a chain', () => {
     expect(isTeamHostCall({ action: 'chain_approval', owner })).toBe(false);
   });
 });
+
+describe('the person\'s webhook routine actions', () => {
+  const bot = 'b_' + '1'.repeat(32);
+  it('sets an event routine, with the choice to let its sub-session change files, and rotates its secret; and refuses what is not a routine', () => {
+    expect(isChainAction({ action: 'routine_set', botId: bot, name: 'Deploy failed', schedule: { kind: 'event' }, prompt: 'Triage it.', workspace: 'same' })).toBe(true);
+    expect(isChainAction({ action: 'routine_set', botId: bot, name: 'Deploy failed', schedule: { kind: 'event' }, workspace: 'read_only' })).toBe(false);
+    expect(isChainAction({ action: 'routine_rotate_hook', botId: bot, name: 'Deploy failed' })).toBe(true);
+    expect(isChainAction({ action: 'routine_rotate_hook', botId: bot })).toBe(false);
+  });
+  it('keeps the fields a webhook routine and its runs hold within bounds', async () => {
+    const { isRoutine, HOOK_BATCH_LIMIT } = await import('./routines.js');
+    const routine = { id: 'r1', name: 'Deploy failed', schedule: { kind: 'event' }, by: 'person', anchor: 1, runCount: 0, runs: [], hook: { id: 'a'.repeat(12), hash: 'b'.repeat(64) }, events: ['x'], eventsDropped: 2, lastEventAt: 5 };
+    expect(isRoutine(routine)).toBe(true);
+    expect(isRoutine({ ...routine, hook: { id: 'short', hash: 'b'.repeat(64) } })).toBe(false);
+    expect(isRoutine({ ...routine, events: Array.from({ length: HOOK_BATCH_LIMIT + 1 }, () => 'x') })).toBe(false);
+    expect(isRoutine({ ...routine, runs: [{ n: 1, trigger: 'event', dueAt: 1, state: 'running', events: 3 }] })).toBe(true);
+  });
+});

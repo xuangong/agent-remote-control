@@ -103,7 +103,13 @@ export function createTeamService(ports: TeamServicePorts) {
       assertHost(hostId) { if (ports.requireHost(hostId).tasks !== 1) throw new BrokerError(409, 'tasks_upgrade_required', 'Update the Controller to use tasks.'); },
     },
     // Hosts that run tasks also bind assistants' main sessions to links.
-    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1, ...(options.placeBot ? { placeBot: options.placeBot } : {}), ...(options.setMission ? { setMission: options.setMission } : {}), ...(options.setMemory ? { setMemory: options.setMemory } : {}), ...(options.setChief ? { setChief: options.setChief } : {}), ...(options.setPrimary ? { setPrimary: options.setPrimary } : {}) } } : {}),
+    ...(options.assistantGroups ? { assistants: { groups: options.assistantGroups, capable: (hostId: string) => brokerState.hosts.get(hostId)?.tasks === 1,
+      models: async (hostId: string, providerId: string, nativeSessionId: string) => {
+        const result = await ports.rpc(ports.requireHost(hostId), 'POST', '/remote/team/session-models', undefined, JSON.stringify({ providerId, nativeSessionId }));
+        if (result.status !== 200) return undefined;
+        const value = JSON.parse(result.body) as { models?: unknown };
+        return Array.isArray(value.models) ? value.models.filter((item): item is string => typeof item === 'string') : undefined;
+      }, ...(options.placeBot ? { placeBot: options.placeBot } : {}), ...(options.setMission ? { setMission: options.setMission } : {}), ...(options.setMemory ? { setMemory: options.setMemory } : {}), ...(options.setChief ? { setChief: options.setChief } : {}), ...(options.setPrimary ? { setPrimary: options.setPrimary } : {}) } } : {}),
   });
   return { teams, resolveRole };
 }

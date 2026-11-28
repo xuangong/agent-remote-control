@@ -126,3 +126,7 @@ input.lab-assistant-card-name { width: 100%; background: var(--orchard-surface);
 .lab-routine-days { display: flex; flex-wrap: wrap; gap: var(--orchard-space-2xs); margin: 0; padding: 0; border: 0; }
 .lab-routine-days legend { width: 100%; color: var(--orchard-text-secondary); font-size: var(--orchard-type-caption-size); }
 .lab-routine-days button[aria-pressed="true"] { background: var(--orchard-fill-strong); box-shadow: inset 0 0 0 2px var(--orchard-focus); }
+.lab-routine-warning { margin: 0; color: var(--orchard-danger-text); font-size: var(--orchard-type-caption-size); }
+.lab-routine-address { display: grid; gap: var(--orchard-space-2xs); }
+.lab-routine-address code { overflow-wrap: anywhere; padding: var(--orchard-space-xs) var(--orchard-space-s); border-radius: var(--orchard-radius-row); background: var(--orchard-surface); font-size: var(--orchard-type-caption-size); user-select: all; }
+.lab-routine-check { display: flex !important; grid-template-columns: none; align-items: center; gap: var(--orchard-space-s); }

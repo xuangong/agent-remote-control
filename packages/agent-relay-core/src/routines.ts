@@ -9,8 +9,8 @@
  * Host away) does not queue another: the waiting run counts it as missed and says so when it is delivered, so a long absence is one run.
  * A due time that finds the run working is skipped. A routine with its own daily limit stops there.
  */
-import { createHash, randomUUID } from 'node:crypto';
-import { ROUTINE_RUNS_KEPT, ROUTINES_PER_BOT, boardItemOpen, localTime, nextRun, routineText, type Routine, type RoutineRun, type RoutineSchedule, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { HOOK_BATCH_LIMIT, HOOK_EVENT_CHARS, HOOK_MIN_GAP_MS, ROUTINE_RUNS_KEPT, ROUTINES_PER_BOT, boardItemOpen, localTime, nextRun, routineText, type Routine, type RoutineRun, type RoutineSchedule, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { assertTeamQueueCapacity, pendingTeamMessage, type SavedTeam } from './team-delivery.js';
 import { plain } from './drafts.js';
 import type { Assistant, AssistantBrokerPorts } from './assistants.js';
@@ -31,7 +31,7 @@ export const SUB_RETRY_MS = 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** What a person or a bot asks of a routine: the fields `set_routine` carries. */
-export interface RoutineSpec { name: string; schedule: RoutineSchedule; prompt?: string; model?: string; maxRunsPerDay?: number; untilMinutes?: number; timeZone?: string; paused?: boolean }
+export interface RoutineSpec { name: string; schedule: RoutineSchedule; prompt?: string; model?: string; maxRunsPerDay?: number; untilMinutes?: number; timeZone?: string; paused?: boolean; workspace?: 'same' }
 export interface RoutineOptions {
   /** The account's time zone, where daily and weekdays times are read. */
   zone?: () => string;
@@ -40,10 +40,16 @@ export interface RoutineOptions {
   /** A run was queued for the bot: the account counts it. */
   started?: (bot: string) => Promise<void>;
   /** Starts a sub-session of the bot's own, with the model a routine names, to do a run's work; its result reaches the bot as a sub-session's does. */
-  startSub?: (start: { hostId: string; providerId: string; nativeSessionId: string; title: string; operationId: string; name: string; prompt: string; model: string }) => Promise<void>;
+  startSub?: (start: { hostId: string; providerId: string; nativeSessionId: string; title: string; operationId: string; name: string; prompt: string; model?: string; workspace?: 'read_only' }) => Promise<void>;
 }
 /** A run that goes to a sub-session of its own: the routine names a model, and the bot's own session is never switched to it. */
-interface SubStart { chain: string; bot: string; hostId: string; providerId: string; nativeSessionId: string; title: string; name: string; model: string; text: string }
+interface SubStart { chain: string; bot: string; hostId: string; providerId: string; nativeSessionId: string; title: string; name: string; model?: string; readOnly: boolean; text: string }
+const sha = (value: string) => createHash('sha256').update(value).digest('hex');
+/** A webhook's secret and what the routine keeps of it: its id and the secret's hash. The token is the id and the secret, shown to the person once. */
+function newHook(keep?: string): { hook: NonNullable<Routine['hook']>; token: string } {
+  const id = keep ?? randomBytes(6).toString('hex'), secret = randomBytes(32).toString('base64url');
+  return { hook: { id, hash: sha(secret) }, token: `${id}.${secret}` };
+}
 
 /** Every message queued for the bot pushes its quiet routines back to a full interval from now. */
 export function pushBackQuietRoutines(inbox: SavedTeam, now: number): void {
@@ -108,7 +114,7 @@ export class BotRoutines {
    * Sets a routine by name, replacing the one of that name (its runs stay). A bot sets its own; an event routine is the person's alone,
    * and a bot working in an unattended chain sets none, so unattended work cannot enlarge itself.
    */
-  setRoutine(bot: Assistant, spec: RoutineSpec, by: 'person' | 'bot', unattended = false): Promise<{ routines: Routine[] }> {
+  setRoutine(bot: Assistant, spec: RoutineSpec, by: 'person' | 'bot', unattended = false): Promise<{ routines: Routine[]; hook?: { token: string } }> {
     if (by === 'bot' && unattended) fail('A routine or event cannot set routines; it can pause or delete them.');
     if (by === 'bot' && spec.schedule.kind === 'event') fail('Only the person sets a routine that an event starts.');
     if (spec.name === 'work') fail('The work routine follows your open board items; name your routine otherwise.');
@@ -123,9 +129,50 @@ export class BotRoutines {
         ...(spec.paused ? { paused: true as const } : {}), ...(dueAt !== undefined ? { dueAt } : {}),
         ...(spec.untilMinutes !== undefined ? { endsAt: now + spec.untilMinutes * 60_000 } : {}), ...(spec.maxRunsPerDay !== undefined ? { maxRunsPerDay: spec.maxRunsPerDay } : {}),
         runCount: previous?.runCount ?? 0, runs: previous?.runs ?? [] };
+      // A webhook routine keeps its address when it is edited; a new one gets one, shown once.
+      let token: string | undefined;
+      if (spec.schedule.kind === 'event') {
+        if (previous?.hook && previous.schedule.kind === 'event') { routine.hook = previous.hook; if (previous.events) routine.events = previous.events; if (previous.lastEventAt) routine.lastEventAt = previous.lastEventAt; }
+        else { const made = newHook(); routine.hook = made.hook; token = made.token; }
+        if (spec.workspace) routine.workspace = spec.workspace;
+      }
       box.routines = [...others, routine];
-      return { routines: box.routines };
+      return { routines: box.routines, ...(token ? { hook: { token } } : {}) };
     });
+  }
+  /** The person replaces a webhook routine's secret: the old address stops answering at once. */
+  rotateHook(bot: Assistant, name: string): Promise<{ hook: { token: string } }> {
+    return this.change(bot, inbox => {
+      const routine = inbox.inbox!.routines?.find(item => item.name === name && item.schedule.kind === 'event') ?? fail(`No webhook routine of yours is named "${name}".`);
+      const made = newHook(routine.hook?.id); routine.hook = made.hook;
+      return { hook: { token: made.token } };
+    });
+  }
+  /**
+   * A webhook call: the token names the routine (its id) and proves the caller (the secret, by its hash, compared in constant time). A call to a paused
+   * routine, or one the budget refuses, is answered and recorded as skipped. Otherwise the payload joins the routine's batch; the run starts once none is
+   * waiting or working and the last event run began at least five minutes ago, and it takes every event that arrived by then (at most twenty).
+   */
+  async receive(token: string, payload: string): Promise<{ status: 'unknown' } | { status: 'accepted'; queued: boolean; reason?: string }> {
+    const [id, secret] = token.split('.');
+    const find = (teams: readonly SavedTeam[]) => { for (const team of teams) for (const routine of team.inbox?.routines ?? []) if (routine.hook?.id === id) return { team, routine }; return undefined; };
+    const found = id && secret ? find(this.broker.ports.read()) : undefined;
+    const given = Buffer.from(sha(secret ?? ''), 'hex'), kept = Buffer.from(found?.routine.hook?.hash ?? '0'.repeat(64), 'hex');
+    if (!found || !timingSafeEqual(given, kept)) return { status: 'unknown' };
+    const outcome = await this.broker.change(teams => {
+      const own = find(teams); if (!own) return { queued: false, reason: 'gone' };
+      const { team, routine } = own, now = this.broker.ports.now();
+      team.revision++; team.updatedAt = now;
+      if (routine.paused) return { queued: false, reason: 'paused' };
+      const refused = this.options.refuse?.(team, routine, now);
+      if (refused) { this.skip(routine, now, now, refused, 'event'); return { queued: false, reason: refused }; }
+      const events = routine.events ??= [];
+      if (events.length < HOOK_BATCH_LIMIT) events.push(payload.slice(0, HOOK_EVENT_CHARS)); else routine.eventsDropped = (routine.eventsDropped ?? 0) + 1;
+      routine.dueAt ??= Math.max(now, (routine.lastEventAt ?? 0) + HOOK_MIN_GAP_MS);
+      return { queued: true };
+    });
+    this.arm();
+    return { status: 'accepted', ...outcome };
   }
   pause(bot: Assistant, name: string, paused: boolean): Promise<{ routines: Routine[] }> {
     return this.change(bot, (inbox, now) => {
@@ -151,7 +198,7 @@ export class BotRoutines {
       routine.runs = settledRuns(inbox, routine, now);
       if (routine.runs.some(run => run.state === 'waiting' || run.state === 'running')) fail('A run of this routine is still active.');
       const teams = this.broker.ports.read();
-      const run = this.queue(inbox, teams, routine, now, now, 'test', 0, started);
+      const run = this.queue(inbox, teams, routine, now, now, 'test', 0, started, routine.schedule.kind === 'event' ? { events: ['{"sample":"This is a test run; no event arrived."}'], dropped: 0 } : undefined);
       return { run: run.n };
     });
     await this.recordStarted(started);
@@ -195,18 +242,20 @@ export class BotRoutines {
     const seat = inbox.members[0]!, zone = this.zone(routine), quiet = routine.schedule.kind === 'quiet';
     const open = (inbox.inbox!.board?.items ?? []).filter(item => boardItemOpen(item.status)).map(item => ({ title: item.title, status: item.status, ...(item.report ? { report: item.report } : {}) }));
     const late = clockText(run.dueAt, zone) !== clockText(now, zone);
-    const detail = quiet ? 'quiet' : [`run ${run.n}`, `due ${clockText(run.dueAt, zone)}`, ...(late ? [`started ${clockText(now, zone)}`] : []), ...(run.trigger === 'test' ? ['test'] : [])].join(' · ');
-    return routineText({ name: routine.name, detail, quiet, ...(routine.prompt ? { prompt: routine.prompt } : {}),
+    const detail = quiet ? 'quiet' : run.events !== undefined ? [`event run ${run.n}`, `${run.events} ${run.events === 1 ? 'event' : 'events'}`, ...(run.trigger === 'test' ? ['test'] : [])].join(' · ') : [`run ${run.n}`, `due ${clockText(run.dueAt, zone)}`, ...(late ? [`started ${clockText(now, zone)}`] : []), ...(run.trigger === 'test' ? ['test'] : [])].join(' · ');
+    return routineText({ name: routine.name, detail, quiet, ...(routine.prompt ? { prompt: routine.prompt } : {}), ...(run.payloads ? { events: run.payloads, eventsDropped: run.left ?? 0 } : {}),
       ...(run.missed ? { missed: { count: run.missed, since: clockText(run.dueAt, zone) } } : {}), ...(quiet ? { items: open, subSessions: this.roster(teams, seat, now) } : {}) });
   }
   /** Queues a run of a routine for its bot; inside a change. */
-  private queue(inbox: SavedTeam, teams: readonly SavedTeam[], routine: Routine, dueAt: number, now: number, trigger: RoutineRun['trigger'], missed: number, started: Array<{ id: string; bot: string }>): RoutineRun {
+  private queue(inbox: SavedTeam, teams: readonly SavedTeam[], routine: Routine, dueAt: number, now: number, trigger: RoutineRun['trigger'], missed: number, started: Array<{ id: string; bot: string }>, event?: { events: string[]; dropped: number }): RoutineRun {
     const seat = inbox.members[0]!, chain = routineChainId(inbox.id, routine.id, now, routine.runCount + 1);
-    const run: RoutineRun = { n: ++routine.runCount, trigger, dueAt, state: 'waiting', chain, ...(routine.model ? { model: routine.model } : {}), ...(missed ? { missed } : {}) };
+    const run: RoutineRun = { n: ++routine.runCount, trigger, dueAt, state: 'waiting', chain, ...(routine.model ? { model: routine.model } : {}), ...(missed ? { missed } : {}),
+      ...(event ? { events: Math.max(1, event.events.length), payloads: event.events, ...(event.dropped ? { left: event.dropped } : {}) } : {}) };
     const text = this.frame(inbox, teams, routine, run, now);
     routine.runs = [...routine.runs, run].slice(-ROUTINE_RUNS_KEPT);
-    if (routine.model && this.options.startSub) {
-      // The work goes to a sub-session with the routine's model; the run waits until it has started, then works and ends with the first turn of its chain.
+    // A routine that names a model, and every routine an event starts, works in a sub-session of its own: the bot's own session is never switched
+    // to another model, and an event's text, which anyone with the address can write, reaches a session that cannot change files unless the person allowed it.
+    if ((routine.model || routine.schedule.kind === 'event') && this.options.startSub) {
       run.tried = now;
       this.subs.push(this.subStart(inbox, routine, run, text));
       return run;
@@ -218,10 +267,10 @@ export class BotRoutines {
   }
   private subStart(inbox: SavedTeam, routine: Routine, run: RoutineRun, text: string): SubStart {
     const seat = inbox.members[0]!;
-    return { chain: run.chain!, bot: inbox.inbox!.botId, hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '', title: inbox.title, name: routine.name, model: routine.model!, text };
+    return { chain: run.chain!, bot: inbox.inbox!.botId, hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '', title: inbox.title, name: routine.name, ...(routine.model ? { model: routine.model } : {}), readOnly: routine.schedule.kind === 'event' && routine.workspace !== 'same', text };
   }
-  private skip(routine: Routine, dueAt: number, now: number, reason: string): void {
-    routine.runs = [...routine.runs, { n: ++routine.runCount, trigger: 'schedule' as const, dueAt, state: 'skipped' as const, endedAt: now, reason }].slice(-ROUTINE_RUNS_KEPT);
+  private skip(routine: Routine, dueAt: number, now: number, reason: string, trigger: RoutineRun['trigger'] = 'schedule'): void {
+    routine.runs = [...routine.runs, { n: ++routine.runCount, trigger, dueAt, state: 'skipped' as const, endedAt: now, reason }].slice(-ROUTINE_RUNS_KEPT);
   }
   /** Starts the sub-sessions of the runs the last change decided on; one that cannot start ends its run as failed. */
   private async startSubs(): Promise<void> {
@@ -230,15 +279,15 @@ export class BotRoutines {
       const scope = chainScope(item.chain); scope.bots.add(item.bot);
       try {
         await inChain(scope, () => this.options.startSub!({ hostId: item.hostId, providerId: item.providerId, nativeSessionId: item.nativeSessionId, title: item.title,
-          operationId: `routine:${item.chain}`, name: item.name, prompt: item.text, model: item.model }));
+          operationId: `routine:${item.chain}`, name: item.name, prompt: item.text, ...(item.model ? { model: item.model } : {}), ...(item.readOnly ? { workspace: 'read_only' as const } : {}) }));
         await this.chains?.record(scope, { cause: 'routine', bot: item.bot }).catch(() => undefined);
         await this.options.started?.(item.bot).catch(() => undefined);
-        await this.changeRun(item.chain, (run, now) => { delete run.tried; run.state = 'running'; run.startedAt = now; });
+        await this.changeRun(item.chain, (run, now) => { delete run.tried; delete run.payloads; run.state = 'running'; run.startedAt = now; });
       } catch (error) {
         const reason = (error instanceof Error ? error.message : 'could not start').slice(0, 100);
         // A Host that is away keeps the run waiting: it is tried again, and the due times that pass meanwhile count as missed.
         const away = /offline|unavailable|not connected/i.test(reason);
-        await this.changeRun(item.chain, (run, now) => { if (away) run.tried = now; else { delete run.tried; run.state = 'failed'; run.endedAt = now; run.reason = reason; } });
+        await this.changeRun(item.chain, (run, now) => { if (away) run.tried = now; else { delete run.tried; delete run.payloads; run.state = 'failed'; run.endedAt = now; run.reason = reason; } });
       }
     }
   }
@@ -276,6 +325,21 @@ export class BotRoutines {
           const retry = routine.runs.find(run => run.state === 'waiting' && run.tried !== undefined && run.tried + SUB_RETRY_MS <= now);
           if (retry) { retry.tried = now; this.subs.push(this.subStart(inbox, routine, retry, this.frame(inbox, teams, routine, retry, now))); }
           if (routine.dueAt === undefined || routine.dueAt > now) continue;
+          if (routine.schedule.kind === 'event') {
+            // The events that came in run together once nothing of this routine is waiting or working; the next event run starts at least five minutes later.
+            delete routine.dueAt;
+            const events = routine.events ?? [];
+            if (!events.length) continue;
+            if (routine.runs.some(run => run.state === 'waiting' || run.state === 'running')) { routine.dueAt = now + SUB_RETRY_MS; continue; }
+            const dropped = routine.eventsDropped ?? 0;
+            delete routine.events; delete routine.eventsDropped;
+            const refused = this.options.refuse?.(inbox, routine, now);
+            if (refused) { this.skip(routine, now, now, refused, 'event'); continue; }
+            if (routine.maxRunsPerDay !== undefined && routine.runs.filter(run => run.state !== 'skipped' && now - run.dueAt < DAY_MS).length >= routine.maxRunsPerDay) { this.skip(routine, now, now, 'daily limit', 'event'); continue; }
+            routine.lastEventAt = now;
+            this.queue(inbox, teams, routine, now, now, 'event', 0, started, { events, dropped });
+            continue;
+          }
           const dueAt = routine.dueAt, quiet = routine.schedule.kind === 'quiet';
           // The next due time is counted from this one (quiet: from now); a once routine is finished.
           const next = nextRun(routine.schedule, quiet ? now : dueAt, zone(routine), routine.anchor);

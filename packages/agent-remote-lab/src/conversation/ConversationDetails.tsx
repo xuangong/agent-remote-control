@@ -49,8 +49,10 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
   const hold = account?.settings.paused ? 'paused' : account?.absent ? 'absence' : botPaused ? 'bot_paused' : account?.tripped.some(item => item.scope === 'account' || item.scope === botId) ? 'budget' : undefined;
   const routines: RoutinesChoice | undefined = routinesOf && directory?.routineAct && botId ? { routines: routinesOf, zone: account?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, ...(hold ? { hold } : {}), botPaused, ...(models?.length ? { models } : {}),
     ...(directory?.setUnattended ? { pauseBot: async (paused: boolean) => { await directory.setUnattended!({ bots: { [botId]: { paused } } }); reloadAccount(); } } : {}),
-    save: spec => directory.routineAct!({ action: 'routine_set', botId, ...spec }), pause: (name, paused) => directory.routineAct!({ action: 'routine_pause', botId, name, paused }),
-    remove: name => directory.routineAct!({ action: 'routine_delete', botId, name }), test: name => directory.routineAct!({ action: 'routine_test', botId, name }) } : undefined;
+    ...(directory.hookUrl ? { hookUrl: directory.hookUrl } : {}),
+    save: async spec => hookOf(await directory.routineAct!({ action: 'routine_set', botId, ...spec })),
+    rotateHook: async name => hookOf(await directory.routineAct!({ action: 'routine_rotate_hook', botId, name })), pause: async (name, paused) => { await directory.routineAct!({ action: 'routine_pause', botId, name, paused }); },
+    remove: async name => { await directory.routineAct!({ action: 'routine_delete', botId, name }); }, test: async name => { await directory.routineAct!({ action: 'routine_test', botId, name }); } } : undefined;
   useWatchTeamRoster(!!board);
   const workLog = detailsShown && botId && directory?.workLog ? directory.workLog(botId) : [];
   const answering = detailsShown && botId && directory?.answering ? directory.answering(botId) : [];
@@ -98,3 +100,9 @@ function useAccountUnattended(load: (() => Promise<UnattendedView | undefined>) 
   }, [load, reads]);
   return [view, () => setReads(count => count + 1)];
 }
+
+/** The token of a webhook address the Relay returned with a routine change, if it did. */
+const hookOf = (result: unknown): { token: string } | undefined => {
+  const hook = (result as { hook?: { token?: unknown } } | undefined)?.hook;
+  return typeof hook?.token === 'string' ? { token: hook.token } : undefined;
+};

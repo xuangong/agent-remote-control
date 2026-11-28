@@ -87,7 +87,7 @@ it('E20: a bot\'s routine is tested, costs what its model costs, is refused at t
   await act({ action: 'routine_test', botId, name: 'Cheap' });
   const worker = () => stack.provider.known().find(id => id.includes('-new-'));
   await expect.poll(() => (worker() ? stack.provider.session(worker()!)?.sent.join('\n') : '') ?? '', { timeout: 25_000 }).toContain(TASK);
-  expect(stack.provider.session(worker()!)!.sent.join('\n')).toContain('[Routine "Cheap"');
+  expect(stack.provider.session(worker()!)!.sent.join('\n')).toContain('(Routine "Cheap"');
   expect(inputs(stack, 'chief').filter(input => input.kind === 'routine' && input.name === 'Cheap')).toEqual([]);
   await expect.poll(async () => (await runs('Cheap'))[0]?.state, { timeout: 30_000 }).toBe('done');
   await context.close();

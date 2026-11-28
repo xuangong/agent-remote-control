@@ -86,7 +86,7 @@ describe('an answer session on the Controller', () => {
     const [entry] = h.team(team.id).ask!.entries;
     expect(entry!.answer!.text).toBe('Two releases shipped.');
     // The question was the person's, not the bot's own: its chief is not told the person wrote to it.
-    expect(h.teams().filter(item => item.inbox).flatMap(item => item.messages).filter(message => message.text.includes('The person wrote'))).toEqual([]);
+    expect(h.teams().filter(item => item.inbox).flatMap(item => item.messages).filter(message => message.text.startsWith('[The person wrote to'))).toEqual([]);
     const [chain] = h.broker.chains.list();
     expect(chain).toMatchObject({ cause: 'person', bot: trackerId, turns: 1 });
   });

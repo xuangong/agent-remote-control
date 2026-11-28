@@ -83,6 +83,20 @@ export const AgentChildSession = Strict({
 });
 export type AgentChildSession = Static<typeof AgentChildSession>;
 
+export const AgentSessionGoal = Strict({
+  objective: Type.String({ minLength: 1, maxLength: 4096 }),
+  status: Type.Union([Type.Literal('active'), Type.Literal('paused'), Type.Literal('blocked'), Type.Literal('usage_limited'), Type.Literal('budget_limited'), Type.Literal('complete')]),
+  iterations: Type.Optional(Type.Integer({ minimum: 0 })),
+  tokensUsed: Type.Optional(Type.Integer({ minimum: 0 })),
+  tokenBudget: Type.Optional(Type.Integer({ minimum: 0 })),
+  timeUsedSeconds: Type.Optional(Type.Integer({ minimum: 0 })),
+  lastReason: Type.Optional(Type.String({ maxLength: 1024 })),
+  startedAt: Type.Optional(Type.Integer({ minimum: 0 })),
+  updatedAt: Type.Optional(Type.Integer({ minimum: 0 })),
+  actions: Type.Optional(Type.Array(Strict({ kind: Type.Union([Type.Literal('clear'), Type.Literal('pause'), Type.Literal('resume')]), commandId: NonEmptyString, args: Type.String({ maxLength: 64 }) }), { maxItems: 3 })),
+});
+export type AgentSessionGoal = Static<typeof AgentSessionGoal>;
+
 export const AgentRuntimeInfo = Strict({
   providerId: NonEmptyString,
   sessionId: Type.Union([NonEmptyString, Type.Null()]),
@@ -98,6 +112,8 @@ export const AgentRuntimeInfo = Strict({
   persistence: Type.Optional(AgentPersistenceHandle),
   /** The account's usage or rate limit stops the runtime's turns until `resetsAt` (milliseconds since the epoch), when the CLI says. */
   usageLimit: Type.Optional(Strict({ resetsAt: Type.Optional(Type.Integer({ minimum: 0 })) })),
+  /** The completion goal the session works toward, as its CLI keeps it. */
+  goal: Type.Optional(AgentSessionGoal),
 });
 export type AgentRuntimeInfo = Static<typeof AgentRuntimeInfo>;
 

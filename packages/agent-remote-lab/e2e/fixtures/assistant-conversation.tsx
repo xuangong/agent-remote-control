@@ -4,10 +4,11 @@
 // ?mode=concise|process|full sets this device's process mode; ?theme=light|dark|system the appearance; ?width=phone narrows the
 // page; ?status=connecting makes requests wait for the connection; ?respond=none leaves them unanswerable; ?pending=none answers
 // every request, so the last turn runs with its live line; ?older=1 leaves older pages of this session to load. The words follow
-// the browser's language.
-import { useState, type ComponentProps } from 'react';
+// the browser's language. ?goal=active|paused|complete|long gives the session a completion goal (long: an objective too long for the line),
+// whose actions run as the adapter's commands would (`window.goalCommands` lists them); `window.setGoal(patch | null)` rewrites it as its CLI would.
+import { useEffect, useState, type ComponentProps } from 'react';
 import { createRoot } from 'react-dom/client';
-import { PROTOCOL_VERSION, type AgentInteractionRequest } from '@orchardworks/agent-remote-protocol';
+import { PROTOCOL_VERSION, type AgentInteractionRequest, type AgentSessionGoal } from '@orchardworks/agent-remote-protocol';
 import { createReplicaState, translator, type AgentReplicaState, type RemoteSessionStatus } from '@orchardworks/agent-client';
 import { buildEveryKindConversation, buildTailPage, TimelineRows } from '@orchardworks/agent-client/testing';
 import { bindAppearance } from '@orchardworks/agent-client-web/browser';
@@ -46,6 +47,22 @@ const state: AgentReplicaState = { ...base, agent: { ...conversation.snapshot, s
     { id: 'outgoing-sending', agentId: conversation.snapshot.id, text: zh ? '顺便把标题改成「IM 原则」。' : 'Also rename the title to IM principles.', status: 'sending' },
     { id: 'outgoing-failed', agentId: conversation.snapshot.id, text: zh ? '再加一行总结。' : 'And add a summary line.', status: 'failed', error: zh ? '电脑没有接收这条消息。' : 'The Host did not accept the message.' },
   ] };
+
+// ?goal=… gives the conversation a completion goal. Its actions run as the adapter's commands: Pause and Resume change the status, Clear removes it.
+const LONG_OBJECTIVE = 'Every unit, contract and component test passes on desktop and phone, the architecture check is clean, and the release notes name each change';
+const goalActions = (status: AgentSessionGoal['status']): NonNullable<AgentSessionGoal['actions']> => status === 'active' ? [{ kind: 'pause', commandId: 'goal', args: 'pause' }, { kind: 'clear', commandId: 'goal', args: 'clear' }]
+  : status === 'paused' ? [{ kind: 'resume', commandId: 'goal', args: 'resume' }, { kind: 'clear', commandId: 'goal', args: 'clear' }] : [];
+const goalParam = params.get('goal');
+let goal: AgentSessionGoal | undefined = goalParam ? { objective: goalParam === 'long' ? LONG_OBJECTIVE : 'All tests pass', status: goalParam === 'paused' || goalParam === 'complete' ? goalParam : 'active',
+  iterations: 3, tokensUsed: 12_400, timeUsedSeconds: 245, lastReason: 'Two tests still fail', actions: goalActions(goalParam === 'paused' || goalParam === 'complete' ? goalParam : 'active') } : undefined;
+const goalListeners = new Set<() => void>();
+const goalCommands: Array<[string, string]> = [];
+const setGoal = (next: AgentSessionGoal | undefined) => { goal = next; for (const listener of goalListeners) listener(); };
+Object.assign(window, { goalCommands, setGoal: (patch: Partial<AgentSessionGoal> | null) => setGoal(patch === null || !goal ? undefined : { ...goal, ...patch, ...(patch.status ? { actions: goalActions(patch.status) } : {}) }) });
+const goalExecute = async (id: string, args: string) => { goalCommands.push([id, args]); if (args === 'clear') setGoal(undefined); else if (goal && (args === 'pause' || args === 'resume')) setGoal({ ...goal, status: args === 'pause' ? 'paused' : 'active', actions: goalActions(args === 'pause' ? 'paused' : 'active') }); return {}; };
+/** The conversation's state with the goal as it stands now. */
+const currentState = (): AgentReplicaState => goalParam ? { ...state, agent: { ...state.agent!, capabilities: { ...state.agent!.capabilities, commands: true },
+  runtimeInfo: { ...state.agent!.runtimeInfo, ...(goal ? { goal } : {}) } } } : state;
 
 /** The session before this one, in the assistant's chain: read once, then the one before it fails after a moment of loading. */
 const earlierRows = new TimelineRows('claude', Date.parse('2026-11-19T09:00:00Z'));
@@ -88,7 +105,9 @@ function WithPage({ children }: { children: React.ReactNode }) {
 /** Chief's conversation: every kind of entry, as the Lab's workbench shows it. */
 export function EveryKindWorkbench({ selected, setSelected, respond, setInspected, ...props }: { selected?: ReadonlySet<string>; setSelected(keys: ReadonlySet<string>): void;
   respond?: () => Promise<void>; setInspected(key: string): void } & Partial<ComponentProps<typeof LabWorkbench>>) {
-  const workbench = <LabWorkbench state={state} sessionStatus={status} draftSessionKey="every-kind"
+  const [, tick] = useState(0);
+  useEffect(() => { const listener = () => tick(value => value + 1); goalListeners.add(listener); return () => { goalListeners.delete(listener); }; }, []);
+  const workbench = <LabWorkbench state={currentState()} sessionStatus={status} draftSessionKey="every-kind"
       assistant={{ name: SAMPLE.names[0]!, avatar: <AssistantAvatar id="chief" picture={{ shape: 'triangle', color: '#ff8a3d', gaze: 1 }} size={26} mood="working" /> }}
       onInspectEntry={key => setInspected(key)}
       entrySelection={{ selected, label: translator(locale)('sessions.quotes.quote'), select(keys, value) { const next = new Set(selected); for (const key of keys) if (value) next.add(key); else next.delete(key); setSelected(next); } }}
@@ -97,6 +116,7 @@ export function EveryKindWorkbench({ selected, setSelected, respond, setInspecte
         readCached={() => undefined} />}
       actions={{
         ...(respond ? { respondToInteraction: respond } : {}),
+        ...(goalParam ? { executeCommand: goalExecute } : {}),
         sendMessage: async () => {}, retryMessage: async () => {}, deleteMessage: () => {}, editPrompt: async () => {}, cancel: async () => {},
         loadOlder: async () => { await new Promise(resolve => setTimeout(resolve, 300)); throw new Error('Earlier activity could not be loaded.'); },
       }} {...props} />;

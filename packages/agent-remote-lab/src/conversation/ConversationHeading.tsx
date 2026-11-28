@@ -1,7 +1,7 @@
 // A conversation's heading in its four modes: inline (its own heading), toolbar (hidden; its tools go to the timeline), assistant
 // (the assistant view's top bar is the heading, so none here) and tile (the assistant's header, with the tile's details panel).
 import type { ReactNode } from 'react';
-import type { AgentStatus } from '@orchardworks/agent-remote-protocol';
+import type { AgentSessionGoal, AgentStatus } from '@orchardworks/agent-remote-protocol';
 import type { SessionFacts, SessionNotice } from '@orchardworks/agent-client';
 import { useTranslate } from '@orchardworks/agent-client-web/react';
 import { SessionHeading } from './SessionHeading.js';
@@ -14,12 +14,14 @@ import type { ConversationHeadingMode, SessionWorkbenchProps } from './session-w
 export interface TileDetails { open: boolean; id: string; setOpen(open: boolean | ((open: boolean) => boolean)): void }
 
 export function ConversationHeading({ mode, assistant, conversationPath, sessionManager, headingStart, workspaceLink, viewOptions, headingContext, attributionToggle, attributionDetails,
-  activity, activityLabel, host, notice, titled, displayScope, tileDetails, searchSlotRef }: {
+  activity, activityLabel, host, notice, goal, titled, displayScope, tileDetails, searchSlotRef }: {
   mode: ConversationHeadingMode; assistant: SessionWorkbenchProps['assistant']; conversationPath?: ReactNode; sessionManager?: ReactNode; headingStart?: ReactNode;
   workspaceLink?: ReactNode; viewOptions: ReactNode; headingContext?: ReactNode;
   /** The attributions' toggle and their details, as `SessionAttributions` gives them. */
   attributionToggle: ReactNode; attributionDetails: ReactNode;
   activity: AgentStatus | undefined; activityLabel: string; host?: SessionFacts['host']; notice?: SessionNotice;
+  /** The completion goal the session works toward, which a tile badges. */
+  goal?: AgentSessionGoal;
   /** The view has a replica or a session to show: its title says Conversation rather than Ready. */
   titled: boolean; displayScope?: string; tileDetails: TileDetails;
   /** Where the timeline's search trigger goes in an inline heading or a tile's menu. */
@@ -29,7 +31,7 @@ export function ConversationHeading({ mode, assistant, conversationPath, session
   if (mode === 'assistant') return null;
   const name = assistant?.name ?? t('conversation.assistant');
   return <div className="lab-workbench-heading-group" hidden={mode === 'toolbar' && !headingContext && !attributionDetails}>
-    {mode === 'tile' ? <TileHeader name={name} avatar={assistant?.avatar} title={conversationPath} {...(assistant?.session ? { session: assistant.session } : {})}
+    {mode === 'tile' ? <TileHeader name={name} avatar={assistant?.avatar} title={conversationPath} {...(assistant?.session ? { session: assistant.session } : {})} {...(goal ? { goal } : {})}
       facts={{ activity: activity ?? 'unknown', ...(host ? { host } : {}), asleep: false, waitingToSend: false, ...(notice ? { notice } : {}) }}
       detailsOpen={tileDetails.open} detailsId={tileDetails.id} onToggleDetails={() => tileDetails.setOpen(open => !open)}
       // One ⋯ menu holds the tile's controls: its details, search, Info, star, close and the session's own actions.

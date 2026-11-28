@@ -3,13 +3,14 @@ Module: one check per CLI, by hand or nightly: `pnpm test:native:codex` (`agent-
 
 | Clauses | Gaps when written | Closed by a test | Not tested, with the reason |
 |---:|---:|---:|---:|
-| 5 | 0 | 0 | 0 |
+| 6 | 0 | 0 | 0 |
 
 ## Clauses
 - N1. A recording names the CLI and the version that made it (`"cli"` header, required by `pnpm fixtures:check`); the check fails while the installed CLI is another version.
 - N2. The installed CLI is the declaration's `verifiedVersion`; the Controller's health compares installed CLIs with the same field (no table of its own).
 - N3. The recorder, run against the committed recordings, finds the same shape: only the journal's rules move a line (`recordingShape`).
 - N4. Each declared field the check can provoke holds on the installed CLI: the probe and the refusal of a second writer, typed; the echoed input id, live and read again; every error text the adapter matches as words, and whether the CLI now gives it a structured code.
+- N6. A goal as the person sets it (`/goal`) is what the adapter reads: Claude Code's `goal_status` transcript rows (set, each check with its reason, met, cleared) against a scripted goal evaluator, and the goal restored when the session is opened again; Codex's `thread/goal/*` (statuses, seconds, set, edit, pause, resume, clear, `get` on a reopened thread) against a scripted model that never finishes the goal. (`native-goal.local.test.ts` of each adapter, part of `pnpm test:native:claude` and `pnpm test:native:codex`.)
 - N5. A normal turn sends no event of a kind the adapter does not know (gap 10); a new one is listed with its meaning, or reported.
 
 Run on 2026-11-22 on this machine:

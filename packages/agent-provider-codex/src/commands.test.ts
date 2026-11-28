@@ -89,13 +89,13 @@ describe('Codex provider commands', () => {
     ]);
     expect(h.session.capabilities.commands).toBe(true);
     const listed = await h.session.listCommands!();
-    expect(listed.map(({ name }) => name)).toEqual(['model', 'permissions', 'compact', 'inspect', 'prompts:review']);
+    expect(listed.map(({ name }) => name)).toEqual(['model', 'permissions', 'compact', 'goal', 'inspect', 'prompts:review']);
     expect(listed.at(-1)).toMatchObject({ description: 'Review work', kind: 'prompt' });
     expect(listed.at(-1)!.inputHint).toContain('only $ARGUMENTS');
     expect(h.server.requests.find(({ method }) => method === 'skills/list')?.params).toEqual({ cwds: ['/work'], forceReload: true });
     h.setSkills([]);
     await rm(path.join(h.home, 'prompts', 'review.md'));
-    expect((await h.session.listCommands!()).map(({ name }) => name)).toEqual(['model', 'permissions', 'compact']);
+    expect((await h.session.listCommands!()).map(({ name }) => name)).toEqual(['model', 'permissions', 'compact', 'goal']);
   });
 
   it('surfaces native discovery failure and rejects execution without submitting a turn', async () => {

@@ -244,3 +244,7 @@ export async function pairSecondHost(stack: Stack, host: Omit<Parameters<Stack['
   });
   return stack.pairController({ key, ...host });
 }
+
+/** The goal pinned above the conversation, and its buttons by their words. */
+export const goalLine = (page: Page) => page.locator('[data-goal-line]');
+export const goalButton = (page: Page, name: 'Pause' | 'Resume' | 'Clear goal') => goalLine(page).getByRole('button', { name, exact: true });

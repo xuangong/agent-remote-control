@@ -20,6 +20,7 @@ import type {
   AgentInputPart,
   AgentCommand,
   AgentCommandResult,
+  AgentSessionGoal,
   AgentMessageOptions,
   AgentSessionSetting,
   AgentInteractionRequest,
@@ -53,6 +54,7 @@ import { CodexSessionRuntime, historyOverlapsNotifications, type CodexRawNotific
 import type { CodexSharedRecoveryPlan } from './shared-recovery.js';
 import { bridgeableNamespace, declaredToolNamespaces, type CodexToolBridge, type CodexToolBridgeRegistration } from './tool-bridge.js';
 import { codexHostAccess, sandboxParams } from './host-access.js';
+import { CODEX_GOAL_COMMAND, codexGoalOf, describeGoal, parseGoalRequest } from './goal.js';
 import { codexLimitResetsAt, mergeCodexRateLimits, type CodexRateLimits } from './usage-limit.js';
 
 const PROVIDER_ID = 'codex';
@@ -167,6 +169,9 @@ export class CodexAppServerSession implements AgentSession {
   private rateLimits: CodexRateLimits = new Map();
   /** The usage limit that stopped the latest turn, until the next turn starts. */
   private usageLimit: AgentRuntimeInfo['usageLimit'];
+  /** The thread's goal as Codex last reported it, and how many times that changed, so a read that began before a notification does not undo it. */
+  private goal: AgentSessionGoal | undefined;
+  private goalRevision = 0;
   private runtimeRevision = 0;
   private settingsRevision = 0;
   private statusRevision = 0;
@@ -716,6 +721,8 @@ export class CodexAppServerSession implements AgentSession {
       collectCodexThreadHistoryItems(history, handle.sessionId),
       undefined, false, history,
     );
+    // A thread opened again keeps the goal it had, which arrives as a runtime update; a new one cannot have one.
+    void session.loadGoal();
     if (hydrateEmpty && Array.isArray(history.thread.turns) && history.thread.turns.length === 0 && preparedCollaborationMode) {
       await session.setPlanning(true);
     }
@@ -1068,6 +1075,7 @@ export class CodexAppServerSession implements AgentSession {
 
   async executeCommand(id: string, args: string): Promise<AgentCommandResult> {
     this.nativeEvidence.invalidate();
+    if (id === CODEX_GOAL_COMMAND) return this.executeGoalCommand(args);
     this.assertCommandIdle();
     if (this.permissionsLocked && id === 'permissions') throw new AgentOperationRejectedError('operation_rejected', this.config.access === 'read_only' ? READ_ONLY_PERMISSIONS : 'Native permission commands are locked by local Host policy.');
     if (this.executingCommand) throw new AgentOperationRejectedError('operation_rejected', 'A Codex command is already active.');
@@ -1091,6 +1099,50 @@ export class CodexAppServerSession implements AgentSession {
       }
       return {};
     } finally { this.executingCommand = false; }
+  }
+
+  /**
+   * `/goal` acts on the thread's goal, which a running turn works toward, so it runs while a turn runs: pausing or clearing is
+   * what a person does to a goal in progress. What the person sets here is theirs (`origin: user`), never the model's.
+   */
+  private async executeGoalCommand(args: string): Promise<AgentCommandResult> {
+    this.assertDirectInput();
+    if (this.config.access === 'read_only') throw new AgentOperationRejectedError('operation_rejected', READ_ONLY_PERMISSIONS);
+    const request = parseGoalRequest(args);
+    if ('error' in request) throw new AgentOperationRejectedError('operation_rejected', request.error);
+    const threadId = this.threadId;
+    if (!threadId) throw new AgentOperationRejectedError('operation_rejected', 'Codex session has no thread yet.');
+    const origin = 'user';
+    try {
+      if (request.kind === 'show') { await this.loadGoal(); return { text: describeGoal(this.goal) }; }
+      if (request.kind === 'clear') await this.transport.request('thread/goal/clear', { threadId, origin });
+      else {
+        const params = request.kind === 'pause' ? { status: 'paused' } : request.kind === 'resume' ? { status: 'active' } : { objective: request.objective };
+        const answer = await this.transport.request('thread/goal/set', { threadId, origin, ...params });
+        this.setGoal(isRecord(answer) ? codexGoalOf(answer.goal) : undefined);
+      }
+    } catch (error) {
+      if (error instanceof CodexAppServerRpcError) throw new AgentOperationRejectedError('operation_rejected', error.message);
+      throw error;
+    }
+    return {};
+  }
+
+  /** Reads the thread's goal from Codex; a Codex without goals leaves the thread with none. */
+  private async loadGoal(): Promise<void> {
+    const revision = this.goalRevision;
+    const threadId = this.threadId;
+    if (!threadId) return;
+    let answer: unknown;
+    try { answer = await this.transport.request('thread/goal/get', { threadId }); } catch { return; }
+    if (revision === this.goalRevision && !this.disposed) this.setGoal(isRecord(answer) ? codexGoalOf(answer.goal) : undefined);
+  }
+
+  private setGoal(goal: AgentSessionGoal | undefined): void {
+    this.goalRevision++;
+    if (isDeepStrictEqual(goal, this.goal)) return;
+    this.goal = goal;
+    if (this.ready && !this.disposed) this.emitRuntimeUpdate();
   }
 
   private assertCommandIdle(): void {
@@ -1187,6 +1239,7 @@ export class CodexAppServerSession implements AgentSession {
       status: this.runtimeStatus,
       ...(this.runtimeStatus === 'failed' && this.latestFailure ? { failure: { ...this.latestFailure } } : {}),
       ...(this.usageLimit ? { usageLimit: { ...this.usageLimit } } : {}),
+      ...(this.goal ? { goal: structuredClone(this.goal) } : {}),
       ...(this.runtime.connectionInfo() ? { connection: this.runtime.connectionInfo() } : {}),
       childSessions: this.threadId ? this.runtime.childSessions(this.threadId) : [],
       ...(this.config.cwd ? { cwd: this.config.cwd } : {}),
@@ -1479,6 +1532,10 @@ export class CodexAppServerSession implements AgentSession {
   }
 
   private handleRuntimeNotification(method: string, params: unknown): boolean {
+    if (method === 'thread/goal/updated' || method === 'thread/goal/cleared') {
+      if (isRecord(params) && readString(params.threadId) === this.threadId) this.setGoal(method === 'thread/goal/updated' ? codexGoalOf(params.goal) : undefined);
+      return true;
+    }
     if (method === 'account/rateLimits/updated') {
       this.rateLimits = mergeCodexRateLimits(this.rateLimits, params);
       // Windows reported after the failure still say when the limit that stopped it resets.

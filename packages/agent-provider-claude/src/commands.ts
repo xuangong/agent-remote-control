@@ -6,6 +6,9 @@ import { record } from './projector.js';
 const sessionCommands = new Set(['clear', 'compact', 'context', 'debug', 'extra-usage', 'heapdump', 'init', 'loop', 'schedule', 'usage', 'cost', 'stats',
   'resume', 'fork', 'model', 'permissions', 'login', 'logout', 'exit', 'quit', 'agents', 'mcp', 'config', 'settings']);
 
+/** What `/goal` takes: the condition to meet, or `clear`; with no argument it shows the goal. */
+export const GOAL_INPUT_HINT = 'Condition to meet, or clear';
+
 export async function discoverClaudeCommands(native: Pick<Query, 'reloadSkills' | 'supportedCommands'>): Promise<AgentCommand[]> {
   await native.reloadSkills();
   const entries: unknown = await native.supportedCommands();
@@ -17,9 +20,11 @@ export async function discoverClaudeCommands(native: Pick<Query, 'reloadSkills' 
       throw new Error('Invalid Claude command directory.');
     }
     if (sessionCommands.has(entry.name) && entry.name !== 'compact') continue;
+    // `/goal` is a command of the session, not a skill: it sets, shows and clears the session's goal, and runs as typed.
+    const hint = entry.argumentHint || (entry.name === 'goal' ? GOAL_INPUT_HINT : undefined);
     if (!commands.has(entry.name)) commands.set(entry.name, { id: `claude:${encodeURIComponent(entry.name)}`, name: entry.name,
-      description: entry.description, kind: sessionCommands.has(entry.name) ? 'command' : 'skill',
-      ...(entry.argumentHint ? { inputHint: entry.argumentHint } : {}) });
+      description: entry.description, kind: sessionCommands.has(entry.name) || entry.name === 'goal' ? 'command' : 'skill',
+      ...(hint ? { inputHint: hint } : {}) });
   }
   return validateCommandDirectory([...commands.values()].sort((a, b) => a.name.localeCompare(b.name)));
 }

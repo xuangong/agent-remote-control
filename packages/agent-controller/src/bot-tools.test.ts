@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
+import { FORK_TURNS_LIMIT, isBotMessageResult, type TeamHostCall } from '@orchardworks/agent-remote-protocol';
 import { BotTools, botToolsGiven, workerToolsIn, WORKER_NAMESPACE } from './bot-tools.js';
 
 // The Relay names the bots' main sessions on this Host with their missions; the stub answers as it would.
@@ -233,5 +233,50 @@ describe('reading a sub-session and reading a bot', () => {
     const schema = named(tools, 'read_sub_session').inputSchema as { properties: Record<string, { enum?: string[] }>; required: string[] };
     expect(schema.required).toEqual(['sub_session_id']);
     expect(schema.properties.mode!.enum).toEqual(['last_turn', 'recent']);
+  });
+});
+
+describe('a sub-session forked from the conversation of its bot', () => {
+  const carry = { turns: 2, context: 'CONTEXT', shortened: false };
+  const forking = (fork?: (ref: unknown, turns: number) => Promise<typeof carry>) => {
+    const calls: TeamHostCall[] = [], forked: Array<[unknown, number]> = [];
+    const tools = new BotTools({ request: async call => { calls.push(call); return { sub_session_id: 's' }; }, tasks: () => true,
+      ...(fork ? { fork: async (ref: unknown, turns: number) => { forked.push([ref, turns]); return fork(ref, turns); } } : {}) } as never);
+    const create = (args: Record<string, unknown>) => (tools.namespace(() => ref('chief'), false).tools.find(item => item.name === 'create_sub_session')!.execute({ name: 'Plan', prompt: 'Plan it.', ...args }) as Promise<string>);
+    return { calls, forked, create };
+  };
+
+  it('asks for the last fork_turns turns of the caller\'s main conversation and sends them with the call', async () => {
+    const f = forking(async () => carry);
+    await f.create({ fork_from: 'main', fork_turns: 2 });
+    expect(f.forked).toEqual([[expect.objectContaining({ nativeSessionId: 'chief' }), 2]]);
+    expect(f.calls[0]).toMatchObject({ action: 'create_sub_session', fork: { turns: 2, context: 'CONTEXT' } });
+    expect(f.calls[0]).not.toHaveProperty('fork.shortened');
+  });
+  it('marks a context that had to be shortened', async () => {
+    const f = forking(async () => ({ ...carry, shortened: true }));
+    await f.create({ fork_from: 'main', fork_turns: 2 });
+    expect(f.calls[0]).toMatchObject({ fork: { shortened: true } });
+  });
+  it('requires fork_turns with fork_from, refuses fork_turns alone, and starts nothing', async () => {
+    const f = forking(async () => carry);
+    await expect(f.create({ fork_from: 'main' })).rejects.toThrow('fork_turns');
+    await expect(f.create({ fork_turns: 2 })).rejects.toThrow('fork_from');
+    expect(f.calls).toEqual([]); expect(f.forked).toEqual([]);
+  });
+  it('is refused with the reason when the provider cannot fork, and never starts a fresh session instead', async () => {
+    const f = forking(async () => { throw new Error('dsh cannot carry its conversation into a sub-session; start it without fork_from.'); });
+    await expect(f.create({ fork_from: 'main', fork_turns: 3 })).rejects.toThrow('dsh cannot carry');
+    expect(f.calls).toEqual([]);
+  });
+  it('is refused on a Host that cannot read conversations', async () => {
+    await expect(forking().create({ fork_from: 'main', fork_turns: 3 })).rejects.toThrow('not available on this Host');
+  });
+  it('declares fork_from as main and fork_turns as a bounded count', () => {
+    const tools = forking().create && new BotTools({ request: async () => ({}), tasks: () => true } as never).namespace(() => ref('chief'), false).tools;
+    const schema = tools.find(item => item.name === 'create_sub_session')!.inputSchema as { properties: Record<string, { enum?: string[]; maximum?: number }>; required: string[] };
+    expect(schema.properties.fork_from!.enum).toEqual(['main']);
+    expect(schema.properties.fork_turns!.maximum).toBe(FORK_TURNS_LIMIT);
+    expect(schema.required).toEqual(['name', 'prompt']);
   });
 });

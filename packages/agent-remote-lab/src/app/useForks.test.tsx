@@ -5,6 +5,7 @@ import { RemoteTeamClient } from '@orchardworks/agent-client';
 vi.mock('../conversation/fork-actions.js', async importOriginal => ({ ...await importOriginal<typeof import('../conversation/fork-actions.js')>(), configureFork: vi.fn(async () => undefined), sendForkInput: vi.fn(async () => undefined) }));
 
 const { ForkStore } = await import('../kernel/session-forks.js');
+const { SIDE_SEED_TURNS } = await import('../features/session-links/fork-plan.js');
 const { useForks } = await import('./useForks.js');
 
 const source = buildOpened('source');
@@ -47,6 +48,27 @@ describe('starting a temporary bot with /side', () => {
     expect(scope.directory.attach).toHaveBeenCalledWith('codex', 'worker-session');
     expect(scope.selectSide).toHaveBeenCalledWith(source, expect.objectContaining({ agentId: 'agent-attached', nativeSessionId: 'worker-session', title: 'Check the logs.' }));
     expect(scope.forkBusy.current).toBe(false);
+  });
+  it('starts the Side with the last turns of the conversation when its provider can read its history, as many as the default asks', async () => {
+    const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(false));
+    const entries = Array.from({ length: 6 }, (_, turn) => [{ seq: turn * 2 + 1, item: { type: 'user_message', text: `question ${turn}` } }, { seq: turn * 2 + 2, item: { type: 'assistant_message', text: `answer ${turn}` } }]).flat();
+    const fetchTimeline = vi.fn(async () => ({ payload: { entries, hasOlder: false, reset: false, staleCursor: false, gap: false, error: null } }));
+    const { hook } = await mount({ transport: { fetchTimeline } });
+    await hook.createFork({ agent: { ...agent, capabilities: { history: true } } } as never, source as never, 'console:side', 'Check the logs.');
+    const fork = created.mock.calls[0]![0].fork!;
+    expect(fork.turns).toBe(SIDE_SEED_TURNS);
+    expect(fork.context).toContain('question 5'); expect(fork.context).toContain('question 2'); expect(fork.context).not.toContain('question 1');
+    expect(created.mock.calls[0]![0].bot).toEqual({ name: 'Check the logs.', mission: 'Check the logs.' });
+  });
+  it('starts the Side fresh when its provider cannot read its history, when the conversation is empty, or when the read fails', async () => {
+    const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(false));
+    const fetchTimeline = vi.fn(async () => ({ payload: { entries: [], hasOlder: false, reset: false, staleCursor: false, gap: false, error: null } }));
+    const history = { agent: { ...agent, capabilities: { history: true } } } as never;
+    await (await mount({ transport: { fetchTimeline } })).hook.createFork(sourceState, source as never, 'console:side', 'No history.');
+    expect(fetchTimeline).not.toHaveBeenCalled();
+    await (await mount({ transport: { fetchTimeline } })).hook.createFork(history, source as never, 'console:side', 'Empty.');
+    await (await mount({ transport: { fetchTimeline: vi.fn(async () => { throw new Error('offline'); }) } })).hook.createFork(history, source as never, 'console:side', 'Offline.');
+    expect(created.mock.calls.map(call => call[0].fork)).toEqual([undefined, undefined, undefined]);
   });
   it('names the bot after the first line of its mission, at most 60 characters', async () => {
     const created = vi.spyOn(RemoteTeamClient.prototype, 'create').mockResolvedValue(team(false));

@@ -36,6 +36,29 @@ function fixture() {
   return { broker, as, inbox, timerInputs, read, fire, state: () => state, settleSubs, advance: (ms: number) => { now += ms; } };
 }
 describe('a standing bot\'s timers', () => {
+  it('ends a timer by itself after until_minutes: it wakes the bot until then, and is dropped without a wake once the end has passed', async () => {
+    const f = fixture();
+    expect(await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Check in', minutes: 10, untilMinutes: 25 }))
+      .toEqual({ timers: [expect.objectContaining({ name: 'Check in', intervalMs: 600_000, endsAt: 1_000_000 + 25 * 60_000 })] });
+    // The bot reads each wake before the next tick; read messages leave the inbox.
+    f.read();
+    f.advance(600_000); await f.fire();
+    expect(f.timerInputs()).toHaveLength(1);
+    f.read();
+    f.advance(600_000); await f.fire();
+    expect(f.timerInputs()).toHaveLength(1);
+    f.read();
+    // The tick at 30 min falls after the end at 25: the timer is dropped and nothing wakes the bot.
+    f.advance(600_000); await f.fire();
+    expect(f.timerInputs()).toEqual([]);
+    expect(f.inbox().inbox!.timers).toEqual([]);
+  });
+  it('keeps a timer without until_minutes, and refuses an end on a clear', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Open', minutes: 10 });
+    expect(f.inbox().inbox!.timers![0]).not.toHaveProperty('endsAt');
+    await expect(f.broker.hostCall('mac', { action: 'set_timer', owner: f.as('chief'), name: 'Open', minutes: 0, untilMinutes: 5 })).rejects.toThrow('until_minutes');
+  });
   it('lists the sub-sessions a bot holds on its due timer, with how long each has been idle and what it last did, and not a person\'s side', async () => {
     const f = fixture();
     await f.broker.hostCall('mac', { action: 'update_board', owner: f.as('chief'), items: [{ title: 'Release notes', status: 'working' }] });

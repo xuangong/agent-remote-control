@@ -11,12 +11,16 @@
  *   is `dsh`, planning only if the source supports it and had it active). A remote `dsh` source stands in a
  *   registered workspace instead (`needsWorkspaceLookup`, `workspaceOptions`), and a source workspace that is no
  *   longer registered refuses the fork.
+ * - `SIDE_SEED_TURNS`: `/side` starts with that many recent turns of its conversation when its provider can read its history, and fresh otherwise.
  * - `withForkContext`: a fork copies the conversation from the source's native session. (`/side` starts a temporary bot instead.)
  * - `forkedSession`: the new session is titled after the source and keeps the time its context was captured.
  * - `firstInputPending`: the text after the command is sent as the first input unless the fork already delivered it.
  */
 import type { CreateSessionOptions } from '../../kernel/directory-client.js';
 import { withMessageKey } from '@orchardworks/agent-client';
+
+/** How many recent turns of its conversation a `/side` starts with: enough to know what is being discussed, few enough to stay a small first input. */
+export const SIDE_SEED_TURNS = 4;
 
 export type ForkCommandRoute = 'ask-setting' | 'ask-open' | 'fork';
 

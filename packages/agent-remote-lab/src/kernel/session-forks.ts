@@ -1,4 +1,4 @@
-import { nativeSessionRefKey, serializeNormalizedHistory, quotedSessionContextPrefix } from '@orchardworks/agent-remote-protocol';
+import { nativeSessionRefKey, recentTurnsContext, serializeNormalizedHistory, quotedSessionContextPrefix, type SubSessionFork } from '@orchardworks/agent-remote-protocol';
 import type { SessionRelation } from '@orchardworks/agent-remote-protocol/model';
 import { conversationLocalStorage, storageKeys } from './conversation-storage.js';
 import type { AgentSessionSetting, ProjectedTimelineEntry, TimelineCursor } from '@orchardworks/agent-remote-protocol';
@@ -52,6 +52,7 @@ interface ForkDelivery {
   settings: Pick<AgentSessionSetting, 'id' | 'value'>[];
 }
 const MAX_CONTEXT_ENTRIES = 20_000;
+const SIDE_SEED_ENTRIES = 400;
 interface ForkNavigationIdentity { hostId: string; controllerId: string; target: string; relationId: string; originalSource: string }
 interface ForkNavigation { source: string; controllerId?: string; linked: boolean; revision: number; relationId?: string; editedTarget?: OpenedSession; identity?: ForkNavigationIdentity }
 
@@ -73,6 +74,19 @@ export async function captureForkContext(transport: Pick<RemoteAgentTransport, '
   const boundary = { epoch: page.epoch, seq: page.window.maxSeq };
   const { text, itemCount, shortenedToolCount } = serializeNormalizedHistory(page.entries, Number.POSITIVE_INFINITY);
   return { source: { ...source }, capturedAt: new Date().toISOString(), boundary, itemCount, text, ...(shortenedToolCount ? { shortenedToolCount } : {}) };
+}
+
+/**
+ * The last `turns` turns of a conversation as the start of a `/side` (`recentTurnsContext`, fewer turns when they do not fit). Undefined when the
+ * conversation has none or cannot be read: the Side then starts fresh.
+ */
+export async function captureSideSeed(transport: Pick<RemoteAgentTransport, 'fetchTimeline'>, source: OpenedSession, turns: number): Promise<SubSessionFork | undefined> {
+  try {
+    const page = (await transport.fetchTimeline(source.agentId, 'tail', undefined, SIDE_SEED_ENTRIES, { signal: AbortSignal.timeout(10_000) })).payload;
+    if (page.reset || page.staleCursor || page.gap || page.error) return undefined;
+    const seed = recentTurnsContext(page.entries, turns, { sourceSession: source.nativeSessionId, capturedAt: new Date().toISOString() }, { shrink: true });
+    return seed && { turns: seed.turns, context: seed.context, ...(seed.shortened ? { shortened: true as const } : {}) };
+  } catch { return undefined; }
 }
 
 export function referenceForkContext(source: OpenedSession): SourceReferenceContext {

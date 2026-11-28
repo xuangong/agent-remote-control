@@ -135,7 +135,9 @@ export type Board = Static<typeof Board>;
  * one the Relay keeps for a bot with open board items.
  */
 export const BotTimer = Type.Object({ name: Type.String({ minLength: 1, maxLength: 60 }), intervalMs: Type.Integer({ minimum: 60_000, maximum: 7 * 24 * 60 * 60_000 }), dueAt: time,
-  work: Type.Optional(Type.Literal(true)) }, strict);
+  work: Type.Optional(Type.Literal(true)),
+  /** When the timer ends by itself: it is dropped then and wakes the bot no more. */
+  endsAt: Type.Optional(time) }, strict);
 export type BotTimer = Static<typeof BotTimer>;
 
 /**

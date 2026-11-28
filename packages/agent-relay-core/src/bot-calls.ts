@@ -14,6 +14,7 @@ import { pruneCoordination } from './coordination-retention.js';
 import type { BotInboxes } from './inboxes.js';
 import type { Rooms } from './rooms.js';
 import type { BotWork } from './bot-work.js';
+import { pageList, type BotPages } from './bot-pages.js';
 import { heldItem, type BotBoard, type ItemEdit, type ItemNotice } from './bot-board.js';
 import { newBotId } from './bot-store.js';
 import type { BotAsks } from './bot-asks.js';
@@ -28,7 +29,7 @@ type Owner = { providerId: string; nativeSessionId: string };
 /** A bot as the calls see it. A sub-session carries its Team (`task`) and is no bot: it makes only the calls it is given. */
 /** answer: the bot's answer session this caller is, which may read, keep the board and the memory, and answer, nothing more. */
 export type Bot = { key: string; name: string; standing?: Assistant; task?: SavedTeam; answer?: SavedTeam };
-export interface BotListing { id: string; name: string; label?: string; mission?: string }
+export interface BotListing { id: string; name: string; label?: string; mission?: string; primary?: true }
 /** An item as a list shows it: where it stands, without its brief. */
 const summary = (item: BoardItem) => ({ key: item.key, title: item.title, status: item.status, assignee: item.assignee, ...(item.report ? { report: item.report } : {}) });
 const clip = (text: string, limit: number) => text.length > limit ? `${text.slice(0, limit - 1)}…` : text;
@@ -44,7 +45,7 @@ type SendCall = Pick<Call<'bot_message'>, 'owner' | 'operationId' | 'text' | 'st
 const NOT_FOUND = 'No bot of this account answers to that name. List them with list_bots.';
 
 export class BotCalls {
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks, private readonly places?: HostPlaces) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly tasks: TaskGroups, private readonly messages: AssistantMessages, private readonly inboxes: BotInboxes, private readonly rooms: Rooms, private readonly work: BotWork, private readonly board: BotBoard, private readonly asks: BotAsks, private readonly pages: BotPages, private readonly places?: HostPlaces) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -300,6 +301,38 @@ export class BotCalls {
     }
     return this.moveChief(bot!, to);
   }
+  /** A standing bot writes one of its own pages; a sub-session never does, and no call names another bot's page to write. */
+  async writePage(hostId: string, call: Call<'write_page'>) {
+    const self = this.caller(hostId, call.owner), standing = self.task ? fail('A sub-session does not write pages; its bot does.') : self.standing ?? fail('Only a standing bot keeps pages.');
+    const { page, created } = await this.pages.write(standing, { title: call.title, contents: call.contents, ...(call.pageId ? { pageId: call.pageId } : {}), ...(call.team ? { team: true as const } : {}) });
+    return { pageId: page.pageId, version: page.version, message: `${created ? 'Page created' : 'Page rewritten'}${page.team ? ' as your team page, shown in your conversation and your chief\'s' : ''}.` };
+  }
+  /** Any standing bot of the account's pages are read: the caller's own by default (a sub-session reads its bot's); with a page id one page, without the list. */
+  readPage(hostId: string, call: Call<'read_page'>) {
+    const self = this.caller(hostId, call.owner);
+    const named = call.bot ? this.named(call.bot, self) : 'self';
+    const target = named === 'self' ? (self.task ? this.ownerOf(self)?.standing : self.standing) : named?.standing;
+    if (!target) fail(call.bot ? NOT_FOUND : 'Only a standing bot keeps pages.');
+    const pages = this.pages.read(target!);
+    if (!call.pageId) return { bot: target!.name, pages: pageList(pages) };
+    const page = pages.find(item => item.pageId === call.pageId) ?? fail(`${target!.name} has no page ${call.pageId}; list its pages with read_page.`);
+    return { bot: target!.name, ...page };
+  }
+  /**
+   * The person marks a standing bot that reports to them as their primary bot, or clears the mark. The Relay's one write keeps at most
+   * one; the bots whose role changed are sent their new standing instructions.
+   */
+  async personSetPrimary(botId: string, primary: boolean) {
+    const setPrimary = this.ports.setPrimary ?? fail('The primary bot cannot be set on this Relay.');
+    const directory = () => accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_'));
+    const bot = directory().find(item => item.key === botId) ?? fail('No standing bot of this account has that id.');
+    if (primary && bot.chief) fail('Only a bot that reports to you can be primary.');
+    const before = directory().filter(item => item.primary).map(item => item.key);
+    await setPrimary(botId, primary);
+    const after = directory();
+    await this.inboxes.ensure(after.filter(item => item.key === botId || before.includes(item.key)));
+    return { botId, primary };
+  }
   /** The person moves a standing bot to a chief, or to themselves (null). */
   async personSetChief(botId: string, chief: string | null) {
     const directory = accountDirectory(this.ports.groups());
@@ -495,7 +528,7 @@ export class BotCalls {
   list(hostId: string, call: Call<'list_bots'>) {
     const self = this.caller(hostId, call.owner);
     const standing = accountDirectory(this.ports.groups()).filter(item => item.key.startsWith('b_') && item.key !== self.key && !item.hidden)
-      .map((item): BotListing => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}), ...(item.mission ? { mission: item.mission } : {}) }));
+      .map((item): BotListing => ({ id: item.key, name: item.name, ...(item.label ? { label: item.label } : {}), ...(item.mission ? { mission: item.mission } : {}), ...(item.primary ? { primary: true as const } : {}) }));
     // A standing bot also reads where its open board items stand here.
     const open = (self.standing && this.board.read(self.standing)?.items.filter(entry => boardItemOpen(entry.status)).map(summary)) || [];
     return { bots: standing, ...(open.length ? { board: { open: open.length, items: open } } : {}) };

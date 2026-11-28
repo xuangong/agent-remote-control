@@ -71,3 +71,29 @@ it('keeps a bot\'s memory in its record beside the mission, and moves its chief 
   await f.change('a', { type: 'bot.update', viewId: 'v2', details: { name: 'Tracker', mission: 'Track it.' } });
   expect(f.member('a', 'v2').memory).toBeUndefined();
 });
+
+it('marks at most one bot as primary, replaces the mark in one write, and refuses a bot that reports to another bot; an edit of the details cannot set it', async () => {
+  const f = await fixture();
+  await f.create('a', { v1: { name: 'Chief' }, v2: { name: 'Tracker' }, v3: { name: 'Scout' } });
+  const [chief, tracker, scout] = ['v1', 'v2', 'v3'].map(viewId => f.member('a', viewId).botId!);
+  await f.service.setBotChief(f.me, tracker, chief);
+  const before = f.service.inspect(f.me, 'a').window.revision;
+  await f.service.setBotPrimary(f.me, chief, true);
+  expect(f.member('a', 'v1').primary).toBe(true);
+  expect(f.service.inspect(f.me, 'a').window.revision).toBe(before + 1);
+  // The group keeps placement only.
+  expect(f.state.read().workspaceWindows![0]!.bots!.members.v1).toEqual({ botId: chief });
+  await f.service.setBotPrimary(f.me, scout, true);
+  expect(['v1', 'v2', 'v3'].map(viewId => f.member('a', viewId).primary)).toEqual([undefined, undefined, true]);
+  await expect(f.service.setBotPrimary(f.me, tracker, true)).rejects.toThrow('Only a bot that reports to you can be primary.');
+  await expect(f.service.setBotPrimary(f.me, 'b_' + '9'.repeat(32), true)).rejects.toThrow('no longer exists');
+  await f.change('a', { type: 'bot.update', viewId: 'v1', details: { name: 'Chief', primary: true } });
+  expect(['v1', 'v3'].map(viewId => f.member('a', viewId).primary)).toEqual([undefined, true]);
+  await f.service.setBotPrimary(f.me, scout, false);
+  expect(f.member('a', 'v3').primary).toBeUndefined();
+  // Moving the primary bot under another bot clears the mark: only a bot that reports to the person is primary.
+  await f.service.setBotPrimary(f.me, scout, true);
+  await f.service.setBotChief(f.me, scout, chief);
+  expect(f.member('a', 'v3')).toMatchObject({ chief });
+  expect(f.member('a', 'v3').primary).toBeUndefined();
+});

@@ -70,3 +70,20 @@ test('loads the state of the Worker with answer sessions (and one with a work lo
   const served = new SqliteRelayStore(storage, auth);
   expect((served.initial.tenants[0]!.broker.teams ?? []).every(team => isTeam(team))).toBe(true);
 });
+
+test('a state stored before pages and the primary bot loads, takes a page on an inbox and the primary mark on a record, and reads them back', async () => {
+  const { storage } = storePreviousState();
+  const store = new SqliteRelayStore(storage, auth);
+  const tenant = store.initial.tenants[0]!;
+  expect(tenant.broker.teams![0]!.inbox!.pages).toBeUndefined();
+  expect(store.initial.bots![0]!.primary).toBeUndefined();
+
+  const page = { pageId: 'pg_0a1b2c3d4e5f', title: 'Launch tracker', contents: '| Task | Owner |\n|---|---|\n| Ship | tracker |', version: 2, updatedAt: 9, team: true as const };
+  tenant.broker.teams![0]!.inbox!.pages = [page];
+  store.initial.bots![0]!.primary = true;
+  await store.commit(store.initial);
+  const restarted = new SqliteRelayStore(storage, auth);
+  expect(restarted.initial.tenants[0]!.broker.teams![0]!.inbox!.pages).toEqual([page]);
+  expect(restarted.initial.bots![0]!.primary).toBe(true);
+  expect(restarted.initial.tenants[0]!.broker.teams!.every(team => isTeam(team))).toBe(true);
+});

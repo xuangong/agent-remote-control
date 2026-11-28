@@ -9,6 +9,7 @@ import { BotInboxes } from './inboxes.js';
 import { BotCalls } from './bot-calls.js';
 import { BotAsks } from './bot-asks.js';
 import { BotWork } from './bot-work.js';
+import { BotPages } from './bot-pages.js';
 import { BotBoard } from './bot-board.js';
 import { BotChains, editChainId, memoryChains, type ChainStore } from './chains.js';
 import { chainScope, inChain, seenBefore, stampChain, subSessionId } from './chain-scope.js';
@@ -77,7 +78,7 @@ export class TeamBroker {
       this.inboxes = new BotInboxes(lent, ports.assistants); this.assistants = new AssistantMessages(lent, ports.assistants, this.inboxes); this.rooms = new Rooms(lent, ports.assistants);
       this.work = new BotWork(lent, this.inboxes, this.chains);
       this.asks = new BotAsks(lent, ports.assistants, this.chains, this.inboxes);
-      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, ports.places);
+      if (this.tasks) this.bots = new BotCalls(lent, ports.assistants, this.tasks, this.assistants, this.inboxes, this.rooms, this.work, new BotBoard(lent, this.inboxes, this.work), this.asks, new BotPages(lent, this.inboxes), ports.places);
       this.rooms.arm(); this.work.arm(); this.asks.arm();
     }
   }
@@ -185,6 +186,7 @@ export class TeamBroker {
       try { return await inChain(scope, () => bots.personUpdateBoard(action.botId, action.items, action.plan)); }
       finally { await this.chains.record(scope, { cause: 'person', bot: action.botId }).catch(() => undefined); }
     }
+    if (action.action === 'set_primary') return (this.bots ?? fail(unavailableAssistants)).personSetPrimary(action.botId, action.primary);
     if (action.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).personSetChief(action.botId, action.chief);
     if (action.action !== 'pause_bot' && action.action !== 'resume_bot') fail('This action is not available.');
     return this.change(teams => actOnBot(teams, action, this.ports.now()));
@@ -244,6 +246,8 @@ export class TeamBroker {
     if (call.action === 'set_timer') return (this.bots ?? fail(unavailableAssistants)).setTimer(hostId, call);
     if (call.action === 'board') return (this.bots ?? fail(unavailableAssistants)).readBoard(hostId, call);
     if (call.action === 'update_board') return (this.bots ?? fail(unavailableAssistants)).updateBoard(hostId, call);
+    if (call.action === 'write_page') return (this.bots ?? fail(unavailableAssistants)).writePage(hostId, call);
+    if (call.action === 'read_page') return (this.bots ?? fail(unavailableAssistants)).readPage(hostId, call);
     if (call.action === 'remember') return (this.bots ?? fail(unavailableAssistants)).remember(hostId, call);
     if (call.action === 'forget') return (this.bots ?? fail(unavailableAssistants)).forget(hostId, call);
     if (call.action === 'set_chief') return (this.bots ?? fail(unavailableAssistants)).setChief(hostId, call);

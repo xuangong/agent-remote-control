@@ -275,11 +275,18 @@ it('E15: the person mentions a busy bot from another conversation, and the answe
   expect(audit.chains.filter(chain => chain.cause === 'person' && chain.bots.some(bot => audit.names[bot] === 'Tracker') && chain.turns === 1)).toHaveLength(1);
   // The bot's main session learns what its answer session did without replaying the chat: the next input it is given carries the work log.
   // Its busy turn ends when the person allows the check; then Chief's message reaches it with the log line in front.
+  // Chief starts a new chain with an input of the person's (an earlier flow stopped the one it was in).
+  await composer.click();
+  await page.keyboard.type('Check the build with Tracker.');
+  await holdsComposerText(page, 'Chief', 'Check the build with Tracker.');
+  await page.keyboard.press('Enter');
+  await expect.poll(() => stack.provider.session('chief')!.sent.includes('Check the build with Tracker.'), { timeout: 20_000 }).toBe(true);
   await expect(stack.provider.useTool('chief', 'message', { to: 'Tracker', text: 'Where does the build stand?', operationId: 'log-1' })).resolves.toMatchObject({ outcome: expect.stringMatching(/delivered|held/) });
   const allow = page.locator('.agent-tool-approval').getByRole('button', { name: 'Allow', exact: true });
   for (let attempt = 0; attempt < 5 && await allow.count(); attempt++) { await allow.click(); await page.waitForTimeout(1500); }
   await expect.poll(() => inputs('tracker').find(input => input.kind === 'work_log'), { timeout: 30_000 }).toMatchObject({ count: 1, body: expect.stringContaining('What is the build status? → The build is green.') });
-  expect(inputs('tracker').map(input => input.kind).filter(kind => kind === 'work_log' || kind === 'assistant')).toEqual(['work_log', 'assistant']);
+  const received = inputs('tracker'), at = received.findIndex(input => input.kind === 'work_log');
+  expect(received.slice(at + 1).find(input => input.kind === 'assistant')).toMatchObject({ body: expect.stringContaining('Where does the build stand?') });
   await showsText(page, 'Work log: 1 new entry');
   await context.close();
 }, 90_000);

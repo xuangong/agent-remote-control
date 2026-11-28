@@ -95,7 +95,7 @@
 .agent-page-card-updated { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }
 .agent-page-card-header .agent-task-open { flex: none; margin-inline-start: 0; }
 /* The page opens over the conversation, so neither opening it nor a rewrite moves an entry. */
-.agent-page-card-body { position: absolute; inset-inline: 0; top: 100%; z-index: 1; min-width: 0; max-height: 60vh; overflow: auto; overscroll-behavior: contain; padding: var(--orchard-space-s) var(--orchard-space-m); border-radius: var(--orchard-radius-card); background: var(--orchard-surface, Canvas); box-shadow: 0 8px 24px rgb(0 0 0 / 0.16); }
+.agent-page-card-body { position: absolute; inset-inline: 0; top: 100%; z-index: 1; min-width: 0; max-height: 60vh; overflow: auto; overscroll-behavior: contain; padding: var(--orchard-space-s) var(--orchard-space-m); border-radius: var(--orchard-radius-card); background: var(--orchard-surface, Canvas); box-shadow: 0 8px 24px color-mix(in srgb, var(--orchard-text) 16%, transparent); }
 .agent-task-card { display: grid; gap: var(--orchard-space-xs); }
 .agent-task-header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--orchard-space-s); }
 .agent-task-kicker { font-size: var(--orchard-type-footnote-size); color: var(--orchard-text-secondary); }

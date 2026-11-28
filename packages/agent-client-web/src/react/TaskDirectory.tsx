@@ -42,7 +42,9 @@ export interface TaskDirectory {
   /** The person changes the account's unattended settings (a bot's own pause, for one); the Relay merges the patch. */
   setUnattended?(patch: Extract<ChainAction, { action: 'set_unattended' }>['patch']): Promise<void>;
   /** The person's own routine operations on a standing bot (set, pause, delete, test), then the roster follows. */
-  routineAct?(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' }>): Promise<void>;
+  routineAct?(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' | 'routine_rotate_hook' }>): Promise<unknown>;
+  /** The public address of a webhook routine for its token, where this Relay has one; absent where it has none (the form then offers no webhook). */
+  hookUrl?(token: string): string | undefined;
   /** Who manages a standing bot now (undefined: the person) and the standing bots it may be moved to. */
   chief?(botId: string): { current?: { botId: string; name: string }; choices: readonly { botId: string; name: string }[] };
   /** The person moves a standing bot to another chief, or to themselves (null); the Relay tells the bots. */

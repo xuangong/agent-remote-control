@@ -19,7 +19,8 @@ export class RemoteChainClient {
     return { chains: value.chains, names: value.names, paused: value.paused, thresholds: value.thresholds ?? {}, ...(value.routines && typeof value.routines === 'object' ? { routines: value.routines } : {}),
       ...(value.unattended && typeof value.unattended === 'object' ? { unattended: value.unattended } : {}) };
   }
-  async act(action: ChainAction): Promise<void> { await this.request('/action', action); }
+  /** The person's decision; the answer is what the Relay returns for it (a new webhook address, for one). */
+  async act(action: ChainAction): Promise<unknown> { return await this.request('/action', action); }
   /** The person edits a standing bot's items and plan note; the answer says what a stale edit overwrote. */
   async writeBoard(botId: string, edit: { items?: readonly BoardItemEdit[]; plan?: BoardPlanEdit }): Promise<BoardWriteResult> {
     const value = await this.request('/action', { action: 'update_board', botId, ...edit });

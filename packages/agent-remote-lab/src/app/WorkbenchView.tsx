@@ -13,6 +13,7 @@ import { ConversationConnectionScope } from '../conversation/conversation-connec
 import { TrackViewScope } from '../kernel/useSessionAttention.js';
 import { ToastActivity } from '../kernel/Toast.js';
 import { useCallback, useMemo, type ReactNode } from 'react';
+import { hookUrlOf } from './hook-url.js';
 import { bringBackText, taskDirectory } from '../features/tasks/task-directory.js';
 import { sendPersonInput } from '../conversation/fork-actions.js';
 import { RemoteChainClient, RemoteTeamClient } from '@orchardworks/agent-client';
@@ -73,7 +74,7 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const chainClient = useMemo(() => new RemoteChainClient(baseUrl, workspaceFetch), [baseUrl]);
   const tasksDirectory = useMemo(() => taskDirectory(tasks, worker => void openSession(worker, undefined, undefined, false, undefined, undefined, undefined, undefined, compactLayout ? 'primary' : undefined),
     async (taskId, action) => { const team = await taskClient.action({ teamId: taskId, action }); updateTaskRoster(baseUrl, [...(tasks ?? []).filter(item => item.id !== team.id), team]); }, windowWorkspace.groups,
-    (botId, chief) => chainClient.act({ action: 'set_chief', botId, chief }),
+    async (botId, chief) => { await chainClient.act({ action: 'set_chief', botId, chief }); },
     async (source, bot, text) => { const team = await taskClient.ask({ operationId: crypto.randomUUID(), source, bot: bot.botId, text }); updateTaskRoster(baseUrl, [...(tasks ?? []).filter(item => item.id !== team.id), team]); },
     async (botId, edit) => {
       const result = await chainClient.writeBoard(botId, edit);
@@ -90,9 +91,11 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
     unattendedOf: () => chainClient.list().then(view => view.unattended),
     setUnattended: async (patch: Parameters<NonNullable<TaskDirectory['setUnattended']>>[0]) => { await chainClient.act({ action: 'set_unattended', patch }); },
     routineAct: async (action: Parameters<NonNullable<TaskDirectory['routineAct']>>[0]) => {
-      await chainClient.act(action);
+      const result = await chainClient.act(action);
       updateTaskRoster(baseUrl, (await taskClient.list()).filter(team => !!team.task || !!team.inbox || !!team.ask));
-    } }), [tasksDirectory, tasks, chainClient, taskClient, updateTaskRoster, baseUrl]);
+      return result;
+    },
+    hookUrl: (token: string) => hookUrlOf(baseUrl, token) }), [tasksDirectory, tasks, chainClient, taskClient, updateTaskRoster, baseUrl]);
   return <TaskDirectoryContext.Provider value={routineDirectory}><AssistantNamesContext.Provider value={assistantNames}><BotWorkbenchProvider scope={scope}><SharedFeedsContext.Provider value={sharedFeeds}><SharedDraftsContext.Provider value={sharedDrafts}><LiveConnectionsContext.Provider value={liveConnections.stable}><SessionDescriptionsContext.Provider value={sessionDescriptions}><SessionExcerptNavigation.Provider value={openExcerptSource}><SessionViewOperationsContext.Provider value={sessionViewOperations}><AskViewScope.Provider value={askView.execute}><WindowSessionBridgeContext.Provider value={windowWorkspace.sessionBridge}><WindowLayoutContext.Provider value={windowWorkspace.authority}><SessionDockProvider key={baseUrl} storageScope={baseUrl} enabled={windowMode && !compactLayout && activeView === 'workbench'}><TrackViewScope.Provider value={userScoped ? attention.executeTrack : undefined}><ConversationConnectionScope.Provider value={connections}><VscodeTunnelScope service={vscodeTunnelClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><PreviewScope client={previewClient} host={previewHost} polling={windowMode && (compactLayout ? contextOpen : desktopContextVisible || pageOpen)}><RecoveryScope.Provider value={readingPositions}><SessionConversationSurfaces scope={baseUrl} transport={transport} mode={navigation.mode}>{/* The frame sizes the rail and Bot mode's panels, leaving Window mode's own sidebar and inspector the room they take; the window's
      title names the assistant on screen, or Window mode's own title. */}
   <DesktopFrame surface={pageShown ? 'page' : windowMode ? 'window' : 'bot'} phone={phone}

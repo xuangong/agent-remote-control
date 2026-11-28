@@ -22,6 +22,7 @@ let routines: Routine[] = [
   { ...base, id: 'r3', name: 'work', by: 'system', work: true, schedule: { kind: 'quiet', minutes: 30 }, dueAt: now + 1_200_000, runs: [] },
   { ...base, id: 'r4', name: 'Look at the failing build and tell me what changed since yesterday, in one paragraph', by: 'person', schedule: { kind: 'every', minutes: 180 }, dueAt: now + 3_600_000, runCount: 1,
     runs: [{ n: 1, trigger: 'schedule', dueAt: now - 3_600_000, state: 'skipped', reason: 'budget' }] },
+  { ...base, id: 'r6', name: 'Deploy failed', by: 'person', schedule: { kind: 'event' }, hook: { id: 'a'.repeat(12), hash: 'b'.repeat(64) }, events: ['{"service":"api"}', '{"service":"web"}'], runs: [], runCount: 0 },
   { ...base, id: 'r5', name: 'Quarter check', by: 'person', schedule: { kind: 'once', at: now + 86_400_000 * 20 }, dueAt: now + 86_400_000 * 20, runs: [] },
 ];
 if (new URLSearchParams(location.search).has('empty')) routines = [];
@@ -35,8 +36,9 @@ function Details() {
   const [, bump] = useState(0);
   const change = async (record: unknown, apply: () => void) => { actions.push(record); apply(); bump(count => count + 1); };
   return <main className="lab-settings lab-assistant-details-body" aria-label="Routines" style={{ padding: 16, maxWidth: 560 }}><RoutinesList choice={{ routines, zone: 'Asia/Shanghai', hold: 'budget', botPaused: false, models: [{ value: 'default', label: 'Default' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'haiku', label: 'Haiku' }],
+    hookUrl: token => `https://relay.example/hooks/ns/${token}`, rotateHook: name => change({ rotate: name }, () => undefined).then(() => ({ token: 'abc123abc123.' + 'x'.repeat(43) })),
     pauseBot: paused => change({ pauseBot: paused }, () => undefined),
-    save: spec => change({ save: spec }, () => { routines = [...routines.filter(item => item.name !== spec.name), { ...base, id: spec.name, name: spec.name, by: 'person', schedule: spec.schedule, runs: [], ...(spec.prompt ? { prompt: spec.prompt } : {}) }]; }),
+    save: spec => change({ save: spec }, () => { routines = [...routines.filter(item => item.name !== spec.name), { ...base, id: spec.name, name: spec.name, by: 'person', schedule: spec.schedule, runs: [], ...(spec.workspace ? { workspace: spec.workspace } : {}), ...(spec.prompt ? { prompt: spec.prompt } : {}) }]; }).then(() => spec.schedule.kind === 'event' ? { token: 'abc123abc123.' + 'y'.repeat(43) } : undefined),
     pause: (name, paused) => change({ pause: [name, paused] }, () => { routines = routines.map(item => item.name === name ? (paused ? { ...item, paused: true as const } : (({ paused: _p, ...rest }) => rest)(item)) : item); }),
     remove: name => change({ remove: name }, () => { routines = routines.filter(item => item.name !== name); }),
     test: name => change({ test: name }, () => { routines = routines.map(item => item.name === name ? { ...item, runs: [...item.runs, { n: item.runCount + 1, trigger: 'test' as const, dueAt: Date.now(), state: 'waiting' as const }] } : item); }) }} /></main>;

@@ -166,6 +166,12 @@ export function createControlRoutes(ctx: SessionCoreContext) {
           return json(409, { code: error instanceof SuccessionPreparationRejected ? error.code : 'succession_request_failed', error: error instanceof Error ? error.message : 'Session succession failed.' });
         }
       }
+      if (url.pathname === '/remote/team/session-models') {
+        if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
+        if (request.method !== 'GET') return json(405, {error: 'Method is not allowed.'});
+        try { return json(200, { models: await team.sessionModels({ providerId: requiredString(url.searchParams.get('providerId'), 'providerId'), nativeSessionId: requiredString(url.searchParams.get('nativeSessionId'), 'nativeSessionId') }) ?? [] }); }
+        catch (error) { return json(409, {error: error instanceof Error ? error.message : 'Models are unavailable.'}); }
+      }
       if (url.pathname === '/remote/team/create-seat') {
         if (!team) return json(404, {error: 'Update the Controller to use Teams.'});
         if (request.method !== 'POST' || !isTeamSeat(payload)) return json(400, {error: 'Invalid Team session request.'});

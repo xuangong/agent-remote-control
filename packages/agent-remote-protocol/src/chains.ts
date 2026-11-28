@@ -94,7 +94,9 @@ export const ChainAction = Type.Union([
   // The person's own routines of a standing bot (routines design 6, 10): set one by name, pause or resume it, delete it, or run it now as a test.
   Type.Object({ action: Type.Literal('routine_set'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }), schedule: RoutineSchedule, prompt: Type.Optional(Type.String({ minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT })),
     model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), maxRunsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: ROUTINE_RUNS_PER_DAY_LIMIT })),
-    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })), paused: Type.Optional(Type.Boolean()) }, object),
+    untilMinutes: Type.Optional(Type.Integer({ minimum: 1, maximum: 30 * 24 * 60 })), paused: Type.Optional(Type.Boolean()), workspace: Type.Optional(Type.Literal('same')) }, object),
+  // The person replaces a webhook routine's secret: the old address stops working, and the answer carries the new one once.
+  Type.Object({ action: Type.Literal('routine_rotate_hook'), botId: BotId, name: Type.String({ minLength: 1, maxLength: 60 }) }, object),
   // The person changes the unattended settings: the fields given are replaced, null removes one; bots and prices are merged by key.
   Type.Object({ action: Type.Literal('set_unattended'), patch: Type.Object({
     timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })), paused: Type.Optional(Type.Boolean()), absenceDays: Type.Optional(Type.Integer({ minimum: 0, maximum: 365 })),

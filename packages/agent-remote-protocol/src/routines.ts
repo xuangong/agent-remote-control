@@ -15,6 +15,12 @@ export const ROUTINES_PER_BOT = 20;
 export const ROUTINE_PROMPT_LIMIT = 2000;
 /** The most runs one routine starts in a day unless its own limit is lower: a bound of the system, not a budget. */
 export const ROUTINE_RUNS_PER_DAY_LIMIT = 200;
+/** Webhooks: the body a call may carry, the events one run takes, how far apart event runs start, and the calls one URL answers in an hour. */
+export const HOOK_BODY_LIMIT = 8192;
+export const HOOK_BATCH_LIMIT = 20;
+export const HOOK_EVENT_CHARS = 2000;
+export const HOOK_MIN_GAP_MS = 5 * 60_000;
+export const HOOK_CALLS_PER_HOUR = 60;
 
 /**
  * One run. dueAt: when the schedule said it was due. waiting: due and queued for the bot, not yet taken. running: taken, the chain's turns
@@ -29,6 +35,10 @@ export const RoutineRun = Type.Object({
   /** What the run's chain used: tokens, the estimated cost in ≈$, and where the estimate is soft. */
   /** A run that goes to a sub-session and could not start yet (its Host is away): when the Relay last tried. */
   tried: Type.Optional(time),
+  /** How many webhook events this run carries. */
+  events: Type.Optional(Type.Integer({ minimum: 1 })),
+  /** The events themselves, kept only while the run waits for its sub-session to start, and how many more were left out. */
+  payloads: Type.Optional(Type.Array(Type.String({ maxLength: HOOK_EVENT_CHARS }), { maxItems: HOOK_BATCH_LIMIT })), left: Type.Optional(Type.Integer({ minimum: 1 })),
   tokens: Type.Optional(count), usd: Type.Optional(Type.Number({ minimum: 0 })), flags: Type.Optional(Type.Array(Type.String({ minLength: 1, maxLength: 40 }), { maxItems: 6 })),
 }, strict);
 export type RoutineRun = Static<typeof RoutineRun>;
@@ -44,6 +54,12 @@ export const Routine = Type.Object({
   schedule: RoutineSchedule, by: Type.Union([Type.Literal('person'), Type.Literal('bot'), Type.Literal('system')]),
   model: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })), timeZone: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   paused: Type.Optional(Type.Literal(true)), work: Type.Optional(Type.Literal(true)), finished: Type.Optional(Type.Literal(true)),
+  /** A webhook routine's address: its id (in the URL) and the hash of its secret, which is never kept. */
+  hook: Type.Optional(Type.Object({ id: Type.String({ pattern: '^[0-9a-f]{12}$' }), hash: Type.String({ pattern: '^[0-9a-f]{64}$' }) }, strict)),
+  /** Events received and not yet run (at most HOOK_BATCH_LIMIT), how many more were left out, and when the last event run started. */
+  events: Type.Optional(Type.Array(Type.String({ maxLength: HOOK_EVENT_CHARS }), { maxItems: HOOK_BATCH_LIMIT })), eventsDropped: Type.Optional(Type.Integer({ minimum: 1 })), lastEventAt: Type.Optional(time),
+  /** Where an event routine's sub-session works: read only unless the person allows changes. */
+  workspace: Type.Optional(Type.Literal('same')),
   anchor: time, dueAt: Type.Optional(time), endsAt: Type.Optional(time), missed: Type.Optional(Type.Integer({ minimum: 1 })),
   maxRunsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: ROUTINE_RUNS_PER_DAY_LIMIT })),
   runCount: count, runs: Type.Array(RoutineRun, { maxItems: ROUTINE_RUNS_KEPT }),

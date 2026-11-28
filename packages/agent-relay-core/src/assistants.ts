@@ -23,6 +23,8 @@ export interface AssistantPorts {
   groups(): readonly WindowGroup[];
   /** The Host runs links; others never see them. */
   capable(hostId: string): boolean;
+  /** The models a session's provider offers (its model setting), or undefined when the Host cannot say; the person's routine takes one of them. */
+  models?(hostId: string, providerId: string, nativeSessionId: string): Promise<string[] | undefined>;
   /** Places a bot another bot created in a group of the account. */
   placeBot?(groupId: string, view: { id: string; binding: WindowSessionBinding }, details: WindowBotDetails): Promise<void>;
   /** Records a standing bot's own lasting change to its mission. */

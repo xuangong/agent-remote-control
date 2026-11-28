@@ -62,3 +62,17 @@ test('keeps the account\'s unattended settings, usage and provider limits across
   await store.commit(store.initial);
   expect(new SqliteRelayStore(storage, auth).initial.tenants[0]!.broker.unattended).toEqual(unattended);
 });
+
+test('loads the routines the previous Worker stored (no webhook fields) and keeps a webhook routine with its hash and waiting events across a reload', async () => {
+  const { storage } = storePreviousState();
+  const previous = new SqliteRelayStore(storage, auth);
+  const state = structuredClone(previous.initial) as any;
+  const inbox = state.tenants[0].broker.teams.find((team: any) => team.inbox).inbox;
+  const old = { id: 'r1', name: 'Morning', schedule: { kind: 'daily', time: '08:30' }, by: 'bot', anchor: 1, runCount: 1, runs: [{ n: 1, trigger: 'schedule', dueAt: 1, state: 'done' }], dueAt: 9 };
+  const hook = { id: 'r2', name: 'Deploy failed', schedule: { kind: 'event' }, by: 'person', anchor: 1, runCount: 0, runs: [], hook: { id: 'a'.repeat(12), hash: 'b'.repeat(64) }, events: ['{"a":1}'], eventsDropped: 2, lastEventAt: 5, dueAt: 305 };
+  delete inbox.timers; inbox.routines = [old, hook];
+  await previous.commit(state);
+  const reloaded = new SqliteRelayStore(storage, auth).initial.tenants[0]!.broker.teams!.find(team => team.inbox)!.inbox!;
+  expect(reloaded.routines).toEqual([old, hook]);
+});
+

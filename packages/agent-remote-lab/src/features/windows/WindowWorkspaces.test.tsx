@@ -9,6 +9,7 @@ import { render } from '../../test/setup.js';
 import { WindowWorkspaces } from './WindowWorkspaces.js';
 import { useWindowActions } from './useWindowActions.js';
 import { WindowWorkspaceClient } from '@orchardworks/agent-client';
+import { BotWorkbenchContext, type BotWorkbenchActions } from './BotWorkbenchContext.js';
 import { botGroup, mountBotApp, seedGroup, until } from '../../test/bot-mode-fixtures.js';
 
 const dialogMethods = ['showModal', 'close'] as const;
@@ -53,6 +54,30 @@ it('copies a Window link without Bot route fields and surfaces section conflicts
   expect(app.container.textContent).toContain('This session is already a bot in "Release".');
   expect(app.workspace().window).toEqual(before); expect(app.workspace().readGroup('A')?.presentation).toEqual({ bots: false });
   await app.close(); localStorage.clear(); sessionStorage.clear();
+});
+
+// The phone's Window panel has no toolbar menu, so its options bind the shown Window to a bot and unbind it.
+const panelWithWorkbench = async (bound: boolean) => {
+  const group = botGroup('A');
+  const request = vi.fn();
+  const actions = { bots: [{ botId: 'b1', name: 'Dango' }], boundTo: (window: { id?: string }) => bound && window.id === 'A' ? { botId: 'b1', name: 'Dango' } : undefined, openWorkbench: async () => {}, openChat: async () => {}, request } as unknown as BotWorkbenchActions;
+  const workspace = { window: group.window, group, windows: [group.window], groups: [group], readGroup: () => group, hasActiveWindow: true, unavailable: false, saveState: undefined } as unknown as ReturnType<typeof useWindowWorkspace>;
+  const container = await render(<BotWorkbenchContext.Provider value={actions}><WindowWorkspaces workspace={workspace} /></BotWorkbenchContext.Provider>);
+  return { container, request, button: (name: string) => [...container.querySelectorAll<HTMLButtonElement>('.lab-window-actions button')].find(item => item.textContent === name) };
+};
+
+it('offers Bind to a bot for a free workbench in the panel options and asks for the bind choice', async () => {
+  const { button, request } = await panelWithWorkbench(false);
+  expect(button('Unbind from Dango')).toBeUndefined();
+  await act(async () => button('Bind to a bot…')!.click());
+  expect(request).toHaveBeenCalledWith('bind');
+});
+
+it('offers Unbind for a bot workbench in the panel options and asks for the confirmation', async () => {
+  const { button, request } = await panelWithWorkbench(true);
+  expect(button('Bind to a bot…')).toBeUndefined();
+  await act(async () => button('Unbind from Dango')!.click());
+  expect(request).toHaveBeenCalledWith('unbind');
 });
 
 async function fixture({ views = [createWindowView('main', undefined, 'primary')], sharedActions = false, ...props }: { views?: WindowView[]; sharedActions?: boolean } & Pick<Parameters<typeof WindowWorkspaces>[0], 'onNavigate' | 'onOverview' | 'placement'> = {}) {

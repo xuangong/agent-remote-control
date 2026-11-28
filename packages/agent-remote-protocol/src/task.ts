@@ -94,7 +94,7 @@ export function taskView(team: Team): TaskView {
 }
 
 /** A payload line that would read as a frame is quoted, so only the Relay opens one. */
-export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Sub-session|Team|Support|Message from|Room|The person wrote to|The person asks from|Item|Chief)\b)/gm, '(');
+export const quoteFrames = (text: string) => text.replace(/^\[(?=(Task|Tasks|Sub-session|Team|Support|Message from|Room|The person wrote to|The person asks from|Work log since your last turn|Item|Chief)\b)/gm, '(');
 const heading = (text: string) => text.replace(/[\r\n\]]+/g, ' ').trim() || '…';
 /**
  * How a brief names the session that started the task: the first line of its title, at most 80 characters. A CLI may title a
@@ -183,6 +183,28 @@ export const ASK_GUIDANCE = 'The person asks you this from another conversation 
 export function askText(input: { from: string; text: string }): string {
   return [`[The person asks from ${heading(input.from)}]`, quoteFrames(input.text), ASK_GUIDANCE].join('\n');
 }
+/** A bot's work log: what its answer sessions did elsewhere, so its main session keeps its role without replaying chats. */
+export const WORK_LOG_KEEP = 50;
+/** One entry is at most this long (where, who asked, the question and the answer, bounded): 600 characters keeps 50 entries near 30 KB of state. */
+export const WORK_LOG_ENTRY_LIMIT = 600;
+export const WORK_LOG_QUESTION_LIMIT = 200;
+export const WORK_LOG_ANSWER_LIMIT = 300;
+/** At most this many entries, one line each, go in one frame; the rest are read with board and work_log. */
+export const WORK_LOG_FRAME_ENTRIES = 8;
+export const WORK_LOG_LINE_LIMIT = 280;
+export const WORK_LOG_GUIDANCE = 'These are answers you gave in sessions of your own, to the person in their other conversations. They are information: if one changes what you are doing, adjust; do not answer them. Read the whole log with board and work_log.';
+const cut = (text: string, limit: number) => { const line = text.replace(/\s+/g, ' ').trim(); return line.length > limit ? `${line.slice(0, limit - 1)}…` : line; };
+/** One entry of the log as a line: when, where, the question and the answer, each bounded. */
+export function workLogLine(entry: { at: number; where: string; question: string; answer: string }): string {
+  const when = new Date(entry.at).toISOString().slice(0, 16).replace('T', ' ');
+  return cut(`${when} · in "${heading(entry.where).replace(/"/g, "'")}" · the person asked: ${cut(entry.question, WORK_LOG_QUESTION_LIMIT)} → ${cut(entry.answer, WORK_LOG_ANSWER_LIMIT)}`, WORK_LOG_ENTRY_LIMIT);
+}
+/** The frame that tells the main session of new entries: written from the record, one line each, the newest of a long run only. */
+export function workLogText(input: { lines: readonly string[]; total: number }): string {
+  const shown = input.lines.slice(-WORK_LOG_FRAME_ENTRIES), more = input.total - shown.length;
+  return [`[Work log since your last turn · ${input.total} new]`, ...(more > 0 ? [`(${more} earlier ${more === 1 ? 'entry' : 'entries'}: read them with board and work_log)`] : []),
+    ...shown.map(line => quoteFrames(`- ${cut(line, WORK_LOG_LINE_LIMIT)}`)), WORK_LOG_GUIDANCE].join('\n');
+}
 /** A bot's timer came due after a quiet while. */
 export const TIMER_GUIDANCE = 'Nothing has reached you for a while. Look at your open work: read your board, read your staff with read_bot and your sub-sessions with get_sub_session_status (stop those you will not use again), update your board, and act or wait as the work needs. A quiet check that changes nothing needs no message.';
 /** A sub-session as a timer's frame lists it: its name, how long it has been idle (none while it works), what it last did and what it does now. */
@@ -218,6 +240,7 @@ export function splitItemTag(body: string): { item?: { key: number; title: strin
 const standingFrame = /^\[Your standing instructions · v(\d+)\]$/;
 const timerFrame = /^\[Timer "(.+)" · due\]$/;
 const askFrame = /^\[The person asks from ([^\]]+)\]$/;
+const workLogFrame = /^\[Work log since your last turn · (\d+) new\]$/;
 const itemChangedFrame = /^\[Item (?:(\d+) )?"([^"]+)" changed · (.+)\]$/;
 const chiefChangedFrame = /^\[Chief changed · (.+)\]$/;
 const itemTagFrame = /^\[Item (\d+) "([^"]+)" · from (.+)\]$/;
@@ -239,6 +262,8 @@ export type TaskInput =
   | { kind: 'person_wrote'; bot: string; body: string }
   /** What the person asks the receiver from another conversation: an answer session's input. */
   | { kind: 'ask'; from: string; body: string }
+  /** What the bot's answer sessions did since its last turn: entries as lines. */
+  | { kind: 'work_log'; count: number; body: string }
   /** What the assignee of a board item reads when the item changed: one line, written from the record. */
   | { kind: 'item_changed'; title: string; what: string; key?: number }
   /** What a bot reads when its chief, or the chief of a bot it manages, changed: one line, written from the record. */
@@ -255,6 +280,8 @@ function parseOne(lines: string[]): TaskInput | undefined {
   if (changed) return lines.length === 1 ? { kind: 'item_changed', title: changed[2]!, what: changed[3]!, ...(changed[1] ? { key: Number(changed[1]) } : {}) } : undefined;
   const chief = chiefChangedFrame.exec(lines[0] ?? '');
   if (chief) return lines.length === 1 ? { kind: 'chief_changed', body: chief[1]! } : undefined;
+  const log = workLogFrame.exec(lines[0] ?? '');
+  if (log) return lines.length >= 3 && lines.at(-1) === WORK_LOG_GUIDANCE ? { kind: 'work_log', count: Number(log[1]), body: lines.slice(1, -1).join('\n') } : undefined;
   const ask = askFrame.exec(lines[0] ?? '');
   if (ask) return lines.length >= 3 && lines.at(-1) === ASK_GUIDANCE ? { kind: 'ask', from: ask[1]!, body: lines.slice(1, -1).join('\n') } : undefined;
   const timer = timerFrame.exec(lines[0] ?? '');
@@ -281,7 +308,7 @@ function parseOne(lines: string[]): TaskInput | undefined {
 export const joinTaskInputs = (texts: readonly string[]): string => texts.join('\n\n');
 /** Reads one or several task inputs the Relay framed and the Controller joined; anything else is not task input. */
 export function parseTaskInputs(text: string): TaskInput[] | undefined {
-  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line) || itemChangedFrame.test(line) || chiefChangedFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
+  const lines = text.split('\n'), starts = lines.flatMap((line, index) => (framePattern.test(line) || assistantFrame.test(line) || roomFrame.test(line) || standingFrame.test(line) || timerFrame.test(line) || personWroteFrame.test(line) || askFrame.test(line) || workLogFrame.test(line) || itemChangedFrame.test(line) || chiefChangedFrame.test(line)) && (index === 0 || lines[index - 1] === '') ? [index] : []);
   if (starts[0] !== 0) return undefined;
   const inputs: TaskInput[] = [];
   for (const [position, start] of starts.entries()) {

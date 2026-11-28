@@ -1,0 +1,766 @@
+{
+  "inboxes": {
+    "valid": [
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 2,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            }
+          ],
+          "logSeen": 1
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": []
+        }
+      }
+    ],
+    "invalid": [
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 0,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "",
+              "answer": "Yes, ship it."
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+              "answer": "Yes, ship it."
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it.",
+              "extra": 1
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "worklog": [
+            {
+              "seq": 1,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 2,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 3,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 4,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 5,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 6,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 7,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 8,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 9,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 10,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 11,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 12,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 13,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 14,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 15,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 16,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 17,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 18,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 19,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 20,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 21,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 22,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 23,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 24,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 25,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 26,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 27,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 28,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 29,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 30,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 31,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 32,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 33,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 34,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 35,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 36,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 37,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 38,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 39,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 40,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 41,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 42,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 43,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 44,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 45,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 46,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 47,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 48,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 49,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 50,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            },
+            {
+              "seq": 51,
+              "at": 1795000000000,
+              "where": "Notes",
+              "question": "Is it ready?",
+              "answer": "Yes, ship it."
+            }
+          ]
+        }
+      },
+      {
+        "id": "t1",
+        "operationId": "op",
+        "revision": 1,
+        "source": {
+          "hostId": "mac",
+          "providerId": "codex",
+          "nativeSessionId": "main",
+          "title": "Reviewer"
+        },
+        "title": "Reviewer's inbox",
+        "status": "active",
+        "members": [
+          {
+            "id": "m1",
+            "hostId": "mac",
+            "providerId": "codex",
+            "role": "requester",
+            "name": "Reviewer",
+            "responsibility": "This assistant's main session.",
+            "creation": "ready",
+            "activity": "idle",
+            "summary": "",
+            "updatedAt": 1,
+            "nativeSessionId": "main"
+          }
+        ],
+        "messages": [],
+        "createdAt": 1,
+        "updatedAt": 5,
+        "inbox": {
+          "botId": "b_11111111111111111111111111111111",
+          "logSeen": -1
+        }
+      }
+    ]
+  },
+  "calls": {
+    "valid": [
+      {
+        "action": "board",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "main"
+        },
+        "workLog": true
+      }
+    ],
+    "invalid": [
+      {
+        "action": "board",
+        "owner": {
+          "providerId": "codex",
+          "nativeSessionId": "main"
+        },
+        "workLog": false
+      }
+    ]
+  },
+  "frames": {
+    "lines": [
+      "2026-11-28 14:03 · in \"Notes\" · the person asked: Is it ready? → Yes, ship it."
+    ],
+    "total": 1
+  }
+}

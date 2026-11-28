@@ -26,6 +26,8 @@ export const WORK_QUIET_MS = 5 * 60_000;
 export const WAITING_QUIET_MS = 30 * 60_000;
 /** A run the bot took and never finished stops blocking its routine after this long. */
 export const ROUTINE_RUN_TIMEOUT_MS = 2 * 60 * 60_000;
+/** A run for a sub-session whose Host was away is tried again this often. */
+export const SUB_RETRY_MS = 60_000;
 const DAY_MS = 24 * 60 * 60_000;
 
 /** What a person or a bot asks of a routine: the fields `set_routine` carries. */
@@ -58,14 +60,18 @@ function syncWorkRoutine(inbox: SavedTeam, now: number): void {
     : { id: 'work', name: 'work', schedule: { kind: 'quiet', minutes }, by: 'system', work: true, anchor: now, dueAt: now + minutes * 60_000, runCount: current?.runCount ?? 0, runs: current?.runs ?? [] }];
 }
 /** When a routine next needs the Relay: it is due, or it ends, whichever comes first. A paused or finished one never does. */
-const stirsAt = (routine: Routine): number => routine.paused || routine.finished ? Infinity : Math.min(routine.dueAt ?? Infinity, routine.endsAt ?? Infinity);
+const stirsAt = (routine: Routine): number => {
+  if (routine.paused || routine.finished) return Infinity;
+  const retry = routine.runs.find(run => run.state === 'waiting' && run.tried !== undefined);
+  return Math.min(routine.dueAt ?? Infinity, routine.endsAt ?? Infinity, retry ? retry.tried! + SUB_RETRY_MS : Infinity);
+};
 const settled = (inbox: SavedTeam) => !inbox.messages.some(pendingTeamMessage);
 const clockText = (instant: number, zone: string) => { const local = localTime(instant, zone), pad = (value: number) => String(value).padStart(2, '0'); return `${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][local.weekday - 1]} ${pad(local.hour)}:${pad(local.minute)}`; };
 
 /** The runs of a routine as they stand now: a waiting run whose message was taken is working; a working run the bot never ended has failed. Pure, so views can use it. */
 export function settledRuns(inbox: SavedTeam, routine: Routine, now: number): RoutineRun[] {
   return routine.runs.map((run): RoutineRun => {
-    if (run.state === 'waiting') {
+    if (run.state === 'waiting' && run.tried === undefined) {
       const message = inbox.messages.find(item => item.chain === run.chain);
       if (message && pendingTeamMessage(message)) return run;
       if (message && (message.status === 'rejected' || message.status === 'canceled')) return { ...run, state: 'failed', endedAt: now, reason: message.status === 'canceled' ? 'withdrawn' : 'not accepted' };
@@ -153,13 +159,13 @@ export class BotRoutines {
     return result;
   }
   /** A turn of a routine's chain ended: its run is done. */
-  async turnEnded(chainId: string, used?: { tokens: number; usd: number; flags: string[] }, outcome: 'finished' | 'failed' | 'interrupted' = 'finished'): Promise<void> {
+  async turnEnded(chainId: string, used?: { tokens: number; usd: number; flags: string[] }, outcome: 'finished' | 'failed' | 'interrupted' = 'finished', reason?: string): Promise<void> {
     await this.broker.change(teams => {
       const now = this.broker.ports.now();
       for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
         const run = routine.runs.find(item => item.chain === chainId);
         if (!run) continue;
-        if (run.state !== 'done' && run.state !== 'failed') { run.state = outcome === 'finished' ? 'done' : 'failed'; run.startedAt ??= now; run.endedAt = now; if (outcome !== 'finished') run.reason = outcome === 'failed' ? 'the turn failed' : 'interrupted'; }
+        if (run.state !== 'done' && run.state !== 'failed') { run.state = outcome === 'finished' ? 'done' : 'failed'; run.startedAt ??= now; run.endedAt = now; if (outcome !== 'finished') run.reason = (outcome === 'failed' ? reason?.replace(/\s+/g, ' ').trim().slice(0, 120) || 'the turn failed' : 'interrupted'); }
         if (used) { run.tokens = (run.tokens ?? 0) + used.tokens; run.usd = (run.usd ?? 0) + used.usd; const flags = [...new Set([...run.flags ?? [], ...used.flags])].slice(0, 6); if (flags.length) run.flags = flags; }
         team.revision++; team.updatedAt = now;
       }
@@ -200,15 +206,19 @@ export class BotRoutines {
     const text = this.frame(inbox, teams, routine, run, now);
     routine.runs = [...routine.runs, run].slice(-ROUTINE_RUNS_KEPT);
     if (routine.model && this.options.startSub) {
-      // The work goes to a sub-session with the routine's model; the run is working from the start and ends with the first turn of its chain.
-      run.state = 'running'; run.startedAt = now;
-      this.subs.push({ chain, bot: inbox.inbox!.botId, hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '', title: inbox.title, name: routine.name, model: routine.model, text });
+      // The work goes to a sub-session with the routine's model; the run waits until it has started, then works and ends with the first turn of its chain.
+      run.tried = now;
+      this.subs.push(this.subStart(inbox, routine, run, text));
       return run;
     }
     const message = { id: digest(['routine', inbox.id, routine.id, run.n]), from: seat.id, to: seat.id, text, status: 'queued' as const, createdAt: now, chain };
     assertTeamQueueCapacity(inbox, message); inbox.messages.push(message);
     started.push({ id: chain, bot: inbox.inbox!.botId });
     return run;
+  }
+  private subStart(inbox: SavedTeam, routine: Routine, run: RoutineRun, text: string): SubStart {
+    const seat = inbox.members[0]!;
+    return { chain: run.chain!, bot: inbox.inbox!.botId, hostId: seat.hostId, providerId: seat.providerId, nativeSessionId: seat.nativeSessionId ?? '', title: inbox.title, name: routine.name, model: routine.model!, text };
   }
   private skip(routine: Routine, dueAt: number, now: number, reason: string): void {
     routine.runs = [...routine.runs, { n: ++routine.runCount, trigger: 'schedule' as const, dueAt, state: 'skipped' as const, endedAt: now, reason }].slice(-ROUTINE_RUNS_KEPT);
@@ -223,17 +233,25 @@ export class BotRoutines {
           operationId: `routine:${item.chain}`, name: item.name, prompt: item.text, model: item.model }));
         await this.chains?.record(scope, { cause: 'routine', bot: item.bot }).catch(() => undefined);
         await this.options.started?.(item.bot).catch(() => undefined);
+        await this.changeRun(item.chain, (run, now) => { delete run.tried; run.state = 'running'; run.startedAt = now; });
       } catch (error) {
         const reason = (error instanceof Error ? error.message : 'could not start').slice(0, 100);
-        await this.broker.change(teams => {
-          const now = this.broker.ports.now();
-          for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
-            const run = routine.runs.find(candidate => candidate.chain === item.chain);
-            if (run) { run.state = 'failed'; run.endedAt = now; run.reason = reason; team.revision++; team.updatedAt = now; }
-          }
-        });
+        // A Host that is away keeps the run waiting: it is tried again, and the due times that pass meanwhile count as missed.
+        const away = /offline|unavailable|not connected/i.test(reason);
+        await this.changeRun(item.chain, (run, now) => { if (away) run.tried = now; else { delete run.tried; run.state = 'failed'; run.endedAt = now; run.reason = reason; } });
       }
     }
+  }
+  /** Changes one run, found by its chain. */
+  private async changeRun(chain: string, update: (run: RoutineRun, now: number) => void): Promise<void> {
+    await this.broker.change(teams => {
+      const now = this.broker.ports.now();
+      for (const team of plain(teams).map((_, index) => teams[index]!)) for (const routine of team.inbox?.routines ?? []) {
+        const run = routine.runs.find(candidate => candidate.chain === chain);
+        if (run) { update(run, now); team.revision++; team.updatedAt = now; }
+      }
+    });
+    this.arm();
   }
   private async recordStarted(started: ReadonlyArray<{ id: string; bot: string }>): Promise<void> {
     for (const chain of started) {
@@ -254,7 +272,11 @@ export class BotRoutines {
         box.routines = box.routines!.filter(routine => routine.endsAt === undefined || routine.endsAt > now);
         for (const routine of box.routines.filter(item => stirsAt(item) <= now)) {
           routine.runs = settledRuns(inbox, routine, now);
-          const dueAt = routine.dueAt ?? now, quiet = routine.schedule.kind === 'quiet';
+          // A run that could not start in its sub-session is tried again, with the due times that passed since counted in it.
+          const retry = routine.runs.find(run => run.state === 'waiting' && run.tried !== undefined && run.tried + SUB_RETRY_MS <= now);
+          if (retry) { retry.tried = now; this.subs.push(this.subStart(inbox, routine, retry, this.frame(inbox, teams, routine, retry, now))); }
+          if (routine.dueAt === undefined || routine.dueAt > now) continue;
+          const dueAt = routine.dueAt, quiet = routine.schedule.kind === 'quiet';
           // The next due time is counted from this one (quiet: from now); a once routine is finished.
           const next = nextRun(routine.schedule, quiet ? now : dueAt, zone(routine), routine.anchor);
           if (next === undefined) { delete routine.dueAt; if (routine.schedule.kind === 'once') routine.finished = true; } else routine.dueAt = Math.max(next, now + 1);
@@ -262,7 +284,7 @@ export class BotRoutines {
           if (quiet && !settled(inbox)) continue;
           const waiting = quiet ? undefined : routine.runs.find(run => run.state === 'waiting'), working = quiet ? undefined : routine.runs.find(run => run.state === 'running');
           const message = waiting && inbox.messages.find(item => item.chain === waiting.chain);
-          if (waiting && message?.status === 'queued') { waiting.missed = (waiting.missed ?? 0) + 1; message.text = this.frame(inbox, teams, routine, waiting, now); continue; }
+          if (waiting && (message?.status === 'queued' || waiting.tried !== undefined)) { waiting.missed = (waiting.missed ?? 0) + 1; if (message) message.text = this.frame(inbox, teams, routine, waiting, now); continue; }
           if (waiting || working) { this.skip(routine, dueAt, now, 'overlap'); continue; }
           const refused = this.options.refuse?.(inbox, routine, now);
           if (refused) { this.skip(routine, dueAt, now, refused); continue; }

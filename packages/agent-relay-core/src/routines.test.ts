@@ -12,6 +12,7 @@ const group = () => ({ window: { id: 'g', title: 'g', revision: 1, views: [['v1'
   bots: { rank: 'm', members: { v1: { botId: ids.chief, name: 'Chief' }, v2: { botId: ids.tracker, name: 'Tracker' } } } }) as unknown as WindowGroup;
 
 function fixture(brokenSeats = false) {
+  const host = { offline: false };
   let state: SavedTeam[] = [], now = 1_000_000, workers = 0;
   const timers = new Map<number, { at: number; run: () => void }>(); let next = 0;
   const scheduler = { setTimeout: (run: () => void, delayMs: number) => { timers.set(++next, { at: now + delayMs, run }); return next; }, clearTimeout: (id: unknown) => { timers.delete(id as number); } };
@@ -23,7 +24,7 @@ function fixture(brokenSeats = false) {
     // Drafts as the Relay's state makes them, so what a change returns is detached as there.
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
     createSeat: async (_, seat) => ({ ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', ...(seat.member.nativeSessionId ? {} : { nativeSessionId: `worker-${++workers}` }) }),
-    tasks: { capable: () => true, assertHost: () => { if (brokenSeats) throw new Error('This Host cannot start sub-sessions.'); } },
+    tasks: { capable: () => true, assertHost: () => { if (brokenSeats) throw new Error('This Host cannot start sub-sessions.'); if (host.offline) throw new Error('The Remote Host is offline.'); } },
     assistants: { groups: () => groups, capable: () => true },
   });
   const as = (nativeSessionId: string) => ({ providerId: 'claude', nativeSessionId });
@@ -33,7 +34,7 @@ function fixture(brokenSeats = false) {
   const read = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.inbox?.botId === ids.chief) for (const message of team.messages) { message.status = 'accepted'; message.acceptance = 'handled'; if (message.chain) team.members[0]!.chain = { id: message.chain, at: now }; } }); };
   // What was queued for the sub-sessions reached them and started their turns.
   const settleSubs = () => { state = committed.produce(state, draft => { for (const team of draft) if (team.task) for (const message of team.messages) if (message.status === 'queued') { message.status = 'accepted'; message.acceptance = 'started'; } }); };
-  return { broker, as, inbox, routineInputs, read, fire, state: () => state, settleSubs, advance: (ms: number) => { now += ms; } };
+  return { host, broker, as, inbox, routineInputs, read, fire, state: () => state, settleSubs, advance: (ms: number) => { now += ms; } };
 }
 const everyTen = { kind: 'every', minutes: 10 } as const;
 describe('a standing bot\'s routines', () => {
@@ -250,10 +251,34 @@ describe('a standing bot\'s routines', () => {
     expect(f.broker.chainView().unattended!.today.usd).toBeCloseTo(1.5, 6);
     expect(f.state().find(team => team.task)!.task!.state).toBe('ended');
   });
+  it('ends a sub-session run as failed with the CLI\'s own words when its turn fails', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Cheap check', schedule: everyTen, model: 'no-such-model' });
+    f.read(); f.advance(600_000); await f.fire(); f.settleSubs();
+    const [sub] = f.state().filter(team => team.task);
+    await f.broker.hostCall('mac', { action: 'sub_turn_end', teamId: sub!.id, memberId: sub!.members[0]!.id, outcome: 'failed', text: 'There is an issue with the selected model (no-such-model).' });
+    expect(f.broker.routines(ids.chief)[0]!.runs[0]).toMatchObject({ state: 'failed', reason: 'There is an issue with the selected model (no-such-model).' });
+  });
   it('ends a run as failed, with the reason, when its sub-session cannot start', async () => {
     const f = fixture(true);
     await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Cheap check', schedule: everyTen, model: 'claude-haiku-4-5' });
     f.read(); f.advance(600_000); await f.fire();
     expect(f.broker.routines(ids.chief)[0]!.runs[0]).toMatchObject({ state: 'failed', reason: expect.stringContaining('cannot start sub-sessions') });
+  });
+  it('keeps a run for a sub-session waiting while its Host is away, counts the due times that pass, and starts one run that says how many when the Host is back', async () => {
+    const f = fixture();
+    await f.broker.hostCall('mac', { action: 'set_routine', owner: f.as('chief'), name: 'Cheap check', schedule: everyTen, prompt: 'Look.', model: 'claude-haiku-4-5' });
+    f.read(); f.host.offline = true;
+    f.advance(600_000); await f.fire();
+    for (let tick = 0; tick < 3; tick++) { f.advance(600_000); await f.fire(); }
+    expect(f.state().filter(team => team.task)).toEqual([]);
+    expect(f.broker.routines(ids.chief)[0]!.runs).toEqual([expect.objectContaining({ n: 1, state: 'waiting', missed: 3, tried: expect.any(Number) })]);
+    f.host.offline = false;
+    f.advance(60_000); await f.fire();
+    const [sub] = f.state().filter(team => team.task);
+    expect(sub!.task!.brief).toContain('3 earlier runs were missed');
+    const run = f.broker.routines(ids.chief)[0]!.runs[0]!;
+    expect(run).toMatchObject({ n: 1, state: 'running', missed: 3 });
+    expect(run).not.toHaveProperty('tried');
   });
 });

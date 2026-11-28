@@ -259,7 +259,7 @@ export class TeamBroker {
           await this.chains.record(chainScope(chainId), { cause: 'routine', bot }, { tokens: call.tokens ?? 0, estimatedUsd: estimate.usd }).catch(() => undefined);
           await this.unattended.record(bot, estimate, call.usage?.model).catch(() => undefined);
         }
-        await this.work?.turnEnded(chainId, { tokens: estimate.tokens || call.tokens || 0, usd: estimate.usd, flags: estimate.flags }, call.outcome);
+        await this.work?.turnEnded(chainId, { tokens: estimate.tokens || call.tokens || 0, usd: estimate.usd, flags: estimate.flags }, call.outcome, call.text);
         // The sub-session did its one piece of work: it ends, so a routine that runs often does not fill the bot's sub-sessions.
         await this.change(teams => { const own = find(teams, call.teamId); if (own.task?.state !== 'ended') taskAction(own, this.ports.now(), 'person'); }).catch(() => undefined);
       }

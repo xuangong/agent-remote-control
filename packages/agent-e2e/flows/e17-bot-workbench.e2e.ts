@@ -95,12 +95,12 @@ it('E17: a free workbench is bound to a bot and unbound again, keeping its tiles
   await choose('Bind to a bot…');
   await page.getByRole('dialog').getByRole('button', { name: 'Chief', exact: true }).click();
   await expect.poll(() => page.locator('.lab-workbench-header').count(), { timeout: 20_000 }).toBe(1);
-  expect((await groups(context)).find(group => group.window.id === groupId)!.window.views.find(view => view.feature?.kind === 'bot')?.binding?.nativeSessionId).toBe('chief');
+  await expect.poll(async () => (await groups(context)).find(group => group.window.id === groupId)!.window.views.find(view => view.feature?.kind === 'bot')?.binding?.nativeSessionId, { timeout: 20_000 }).toBe('chief');
   await choose('Unbind from Chief');
   await page.getByRole('dialog').getByRole('button', { name: 'Unbind', exact: true }).click();
   await expect.poll(() => page.locator('.lab-workbench-header').count(), { timeout: 20_000 }).toBe(0);
+  await expect.poll(async () => (await groups(context)).find(group => group.window.id === groupId)!.window.views.some(view => view.feature?.kind === 'bot'), { timeout: 20_000 }).toBe(false);
   const unbound = (await groups(context)).find(group => group.window.id === groupId)!.window;
-  expect(unbound.views.some(view => view.feature?.kind === 'bot')).toBe(false);
   expect(unbound.views.map(view => view.binding?.nativeSessionId)).toEqual(expect.arrayContaining(['chief', 'tracker']));
   await context.close();
 });
@@ -110,15 +110,19 @@ it('E17: on a phone the workbench is a list, a row pushes the sub-session full s
   await teamOf(stack, context);
   await hasToolsOf(stack, 'chief');
   const workbench = await bindingWorkbench(context, await botIdOf(context, 'Chief'), 'chief', 'Chief');
-  await stack.provider.useTool('chief', 'create_sub_session', { name: 'Tests', prompt: 'Collect the tests.' });
+  await stack.provider.useTool('chief', 'create_sub_session', { name: 'Phone check', prompt: 'Collect the tests.' });
   await page.goto(`${stack.origin}/?mode=window&window=${workbench}`);
   const overview = page.locator('.lab-workbench-overview');
   await expect.poll(() => overview.count(), { timeout: 30_000 }).toBe(1);
-  await expect.poll(() => overview.locator('[data-tile^="sub:"]').count(), { timeout: 30_000 }).toBe(1);
+  // Sub-sessions of the flows before it are still the bot's, so the row is found by its own name.
+  await expect.poll(() => overview.locator('[data-tile^="sub:"]', { hasText: 'Phone check' }).count(), { timeout: 30_000 }).toBe(1);
   // A phone opens a Window address with the sessions drawer over it; dismissing it shows the workbench.
   await page.keyboard.press('Escape');
   expect(await page.locator('[data-primary-group-id]').count()).toBe(0);
-  await overview.locator('[data-tile^="sub:"]').click();
+  // The row is tapped once nothing covers it: the drawer takes a moment to leave.
+  const row = overview.locator('[data-tile^="sub:"]', { hasText: 'Phone check' });
+  await expect.poll(() => row.evaluate(element => { const box = element.getBoundingClientRect(); return element.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); }), { timeout: 10_000 }).toBe(true);
+  await row.click();
   await showsText(page, 'Two tests fail.');
   expect(await overview.count()).toBe(0);
   await page.getByRole('button', { name: /^‹/ }).click();

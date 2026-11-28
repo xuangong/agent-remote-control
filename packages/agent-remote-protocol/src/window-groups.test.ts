@@ -6,7 +6,7 @@ import { WindowLayoutError, createWindowView } from './window-workspace-operatio
 import {
   WindowGroupError, applyGroupOperation, decodeWindowGroup, duplicateBot, hasBotAppearance, isBotView, isWindowGroup, isWindowGroupCreateRequest, isWindowGroupMutation,
   isWindowGroupOperation, isWindowMergeRequest, isWindowSplitRequest, isWindowTransferRequest, mergeGroups, splitGroup, toWindowGroup, transferBot, type WindowGroup,
-  rebindsBot, readBotPicture, WindowBotDetails, WindowBots,
+  rebindsBot, readBotPicture, WindowBotDetails, WindowBots, hasWindowAppearance,
 } from './window-groups.js';
 
 const session = (nativeSessionId: string, title = nativeSessionId) => ({ hostId: 'mac', providerId: 'claude', nativeSessionId, title });
@@ -402,4 +402,22 @@ it('keeps the target\'s settings through a merge and each group\'s own through a
   expect(mergeGroups(target, { ...source, bots: { rank: 'c', members: {} } }).bots).toEqual({ rank: 'b', members: {}, muted: true, notifications: 'needs_you' });
   const moved = transferBot(source, target, 's1');
   expect([moved.source.bots?.notifications, moved.source.bots?.muted, moved.target.bots?.muted]).toEqual(['needs_you', undefined, true]);
+});
+
+const workbenchFixture = JSON.parse(readFileSync(new URL('./fixtures/window-bot-workbench.v1.json', import.meta.url), 'utf8'));
+
+it('reads a bot workbench as an ordinary group: the bot tag is a view feature and the Window shows in Window mode only', () => {
+  expect(isWindowGroup(workbenchFixture)).toBe(true);
+  const group = decodeWindowGroup(workbenchFixture)!;
+  expect(group.window.views[0]!.feature).toEqual({ kind: 'bot', id: 'bot_dango' });
+  expect(hasWindowAppearance(group)).toBe(true);
+  expect(hasBotAppearance(group)).toBe(false);
+  expect(group.bots).toBeUndefined();
+});
+
+it('keeps the bot tag through layout edits and refuses to bind the managed main tile', () => {
+  const group = decodeWindowGroup(workbenchFixture)!;
+  const resized = applyGroupOperation(group, { type: 'view.resize', viewId: 'main', width: 500 });
+  expect(resized.window.views[0]!.feature).toEqual({ kind: 'bot', id: 'bot_dango' });
+  expect(() => applyGroupOperation(group, { type: 'view.bind', viewId: 'main', binding: { hostId: 'local', providerId: 'claude', nativeSessionId: 'other', title: 'x' } })).toThrow(/managed/);
 });

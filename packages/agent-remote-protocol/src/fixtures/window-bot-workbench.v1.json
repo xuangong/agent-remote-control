@@ -1,0 +1,31 @@
+{
+  "window": {
+    "schemaVersion": 3,
+    "id": "wb-bot_dango",
+    "revision": 0,
+    "title": "Dango",
+    "selectedPrimaryViewId": "main",
+    "selectedViewId": "main",
+    "views": [
+      {
+        "id": "main",
+        "binding": { "hostId": "local", "providerId": "claude", "nativeSessionId": "native-main", "title": "Dango" },
+        "feature": { "kind": "bot", "id": "bot_dango" },
+        "bindingPolicy": "managed",
+        "placement": "primary",
+        "width": 440,
+        "collapsed": false,
+        "display": { "mode": "preview", "lettersVisible": true }
+      },
+      {
+        "id": "note",
+        "binding": { "hostId": "local", "providerId": "codex", "nativeSessionId": "native-note", "title": "Notes" },
+        "placement": "primary",
+        "width": 440,
+        "collapsed": true,
+        "display": { "mode": "preview", "lettersVisible": true }
+      }
+    ]
+  },
+  "presentation": { "bots": false }
+}

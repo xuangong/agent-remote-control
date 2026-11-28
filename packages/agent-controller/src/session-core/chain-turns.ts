@@ -51,7 +51,7 @@ const chainable = (request: AgentInteractionRequest): request is ToolApproval =>
 export function inputCause(item: { text: string; messageId?: string; clientMessageId?: string }): TurnCause {
   const inputs = parseTaskInputs(item.text.trim());
   if (inputs) {
-    const messages = inputs.filter(input => input.kind !== 'standing'), only = messages.length === 1 ? messages[0] : undefined;
+    const messages = inputs.filter(input => input.kind !== 'standing' && input.kind !== 'work_log'), only = messages.length === 1 ? messages[0] : undefined;
     if (messages.length > 0 && messages.every(input => input.kind === 'ask')) return { kind: 'framed', asked: true };
     return only?.kind === 'assistant' && !only.final ? { kind: 'framed', answers: only.messageId } : { kind: 'framed' };
   }

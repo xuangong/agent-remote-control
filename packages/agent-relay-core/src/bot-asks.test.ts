@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ASK_IDLE_MS, parseTaskInputs, type BotFact, type Team, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
+import { ASK_IDLE_MS, WORK_LOG_KEEP, parseTaskInputs, type BotFact, type Team, type TeamSeat, type WindowGroup } from '@orchardworks/agent-remote-protocol';
 import { TeamBroker } from './teams.js';
 import { committed, detached } from './drafts.js';
 import type { SavedTeam } from './team-delivery.js';
@@ -21,7 +21,7 @@ function fixture() {
     read: () => state, now: () => now, assertHost: () => {},
     scheduler: { setTimeout: callback => { timer = callback; return callback; }, clearTimeout: () => { timer = undefined; } },
     change: async update => { let result: unknown; state = committed.produce(state, draft => { result = structuredClone(detached(update(draft))); }); return result as never; },
-    createSeat: async (_hostId, seat) => { seats.push(seat); return { ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', nativeSessionId: `answer-${++workers}` }; },
+    createSeat: async (_hostId, seat) => { seats.push(seat); return { ...seat.member, creation: 'ready', activity: 'idle', cwd: '/repo', nativeSessionId: seat.member.nativeSessionId ?? `answer-${++workers}` }; },
     attachments: new PortableAttachmentStore(memoryAttachmentStorage()),
     tasks: { capable: () => true, assertHost: () => {} },
     assistants: { groups: () => [group], capable: () => true,
@@ -183,5 +183,67 @@ describe('answer sessions for the person\'s mentions', () => {
     const polled = await f.call({ action: 'poll' }) as Team[];
     expect(polled.map(item => item.id)).toContain(team.id);
     expect(polled.find(item => item.id === team.id)!.ask!.entries).toHaveLength(1);
+  });
+});
+
+describe('the work log of a bot whose answer sessions answered elsewhere', () => {
+  const log = (f: ReturnType<typeof fixture>, name = 'Tracker') => f.teams().find(team => team.inbox?.botId === f.id(name))?.inbox?.worklog ?? [];
+  const answerOne = async (f: ReturnType<typeof fixture>, from: string, question: string, answer: string) => {
+    const team = await f.ask('Tracker', from, question);
+    await f.call({ action: 'bot_answer', owner: answerSession(team), text: answer, cause: { kind: 'framed', asked: true } });
+  };
+
+  it('gets one dated entry per answered ask: where, the question and the answer, bounded', async () => {
+    const f = fixture();
+    await answerOne(f, 'Notes', 'q'.repeat(500), 'a'.repeat(450));
+    const [entry] = log(f);
+    expect(entry).toMatchObject({ seq: 1, at: 1000, where: 'Notes' });
+    expect(entry!.question.length).toBeLessThanOrEqual(200);
+    expect(entry!.answer.length).toBeLessThanOrEqual(300);
+    // An ask that was never answered is no entry, and an answer given twice is one.
+    await f.ask('Tracker', 'Plans', 'Pending?');
+    expect(log(f)).toHaveLength(1);
+  });
+
+  it('keeps the latest fifty and numbers on', async () => {
+    const f = fixture();
+    for (let index = 0; index < WORK_LOG_KEEP + 3; index++) await answerOne(f, 'Notes', `Q${index}`, `A${index}`);
+    expect(log(f)).toHaveLength(WORK_LOG_KEEP);
+    expect(log(f)[0]).toMatchObject({ seq: 4, question: 'Q3' });
+    expect(log(f).at(-1)).toMatchObject({ seq: WORK_LOG_KEEP + 3 });
+  });
+
+  it('is put ahead of the next input the main session is given, once, and not again', async () => {
+    const f = fixture();
+    await answerOne(f, 'Notes', 'Is it ready?', 'Yes.');
+    await answerOne(f, 'Plans', 'Who signs off?', 'Dana.');
+    // Nothing reaches the main session by itself; the next message does, with the log in front of it.
+    expect(f.teams().find(team => team.inbox?.botId === f.id('Tracker'))!.messages.some(message => message.text.startsWith('[Work log'))).toBe(false);
+    await f.call({ action: 'bot_message', owner: f.as('Reviewer'), operationId: 'm1', to: 'Tracker', text: 'Status?' });
+    const inbox = f.teams().find(team => team.inbox?.botId === f.id('Tracker'))!;
+    const inputs = inbox.messages.flatMap(message => parseTaskInputs(message.text) ?? []);
+    expect(inputs.map(input => input.kind)).toEqual(['standing', 'work_log', 'assistant']);
+    expect(inputs[1]).toMatchObject({ kind: 'work_log', count: 2 });
+    expect((inputs[1] as { body: string }).body).toContain('Who signs off? → Dana.');
+    expect(inbox.inbox!.logSeen).toBe(2);
+    await f.call({ action: 'bot_message', owner: f.as('Reviewer'), operationId: 'm2', to: 'Tracker', text: 'Again?' });
+    expect(f.teams().find(team => team.inbox?.botId === f.id('Tracker'))!.messages.filter(message => message.text.startsWith('[Work log'))).toHaveLength(1);
+    // A later answer is told with the next input after it.
+    await answerOne(f, 'Notes', 'And now?', 'Same.');
+    await f.call({ action: 'bot_message', owner: f.as('Reviewer'), operationId: 'm3', to: 'Tracker', text: 'Third.' });
+    const frames = f.teams().find(team => team.inbox?.botId === f.id('Tracker'))!.messages.flatMap(message => parseTaskInputs(message.text) ?? []).filter(input => input.kind === 'work_log');
+    expect(frames).toHaveLength(2);
+    expect(frames[1]).toMatchObject({ count: 1 });
+  });
+
+  it('is read by the bot with board and work_log, its own only, from the main session or an answer session', async () => {
+    const f = fixture();
+    const team = await f.ask('Tracker', 'Notes', 'Is it ready?');
+    await f.call({ action: 'bot_answer', owner: answerSession(team), text: 'Yes.', cause: { kind: 'framed', asked: true } });
+    const read = await f.call({ action: 'board', owner: f.as('Tracker'), workLog: true }) as { bot: string; workLog: Array<{ where: string; answer: string; line: string }> };
+    expect(read).toMatchObject({ bot: 'Tracker', workLog: [{ where: 'Notes', answer: 'Yes.' }] });
+    expect(read.workLog[0]!.line).toContain('Is it ready? → Yes.');
+    expect(await f.call({ action: 'board', owner: answerSession(team), workLog: true })).toMatchObject({ workLog: [{ where: 'Notes' }] });
+    await expect(f.call({ action: 'board', owner: f.as('Chief'), bot: 'Tracker', workLog: true })).rejects.toThrow();
   });
 });

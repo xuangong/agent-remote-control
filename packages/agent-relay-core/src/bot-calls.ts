@@ -5,7 +5,7 @@
  * standing bot goes to its inbox.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
+import { workLogLine, assistantMessageText, attachmentLines, boardItemOpen, BOARD_BRIEF_LIMIT, BOT_SPAN_LIMIT, chiefChangedText, itemTagText, nativeSessionRefKey, taskView, type BoardItem, type BoardItemEdit, type BoardLink, type BoardPlanEdit, type BotAttachment, type BotFact, type BotMessageResult, type TeamHostCall, type TaskView, type TeamMember } from '@orchardworks/agent-remote-protocol';
 import { accountDirectory, callerAssistant, sessionAssistant, type Assistant, type AssistantBrokerPorts, type AssistantMessages, type AssistantPorts } from './assistants.js';
 import { botLive, ownerTasks, taskAction, type TaskGroups } from './tasks.js';
 import { ACCOUNT_TEAM_LIMIT, type SavedTeam } from './team-delivery.js';
@@ -338,6 +338,10 @@ export class BotCalls {
         target = owner!; name = owner!.name;
       }
     } else target = self.standing ?? fail('Only a standing bot has a board.');
+    if (call.workLog) {
+      if (target.key !== self.key) fail('You read your own work log only.');
+      return { bot: name, workLog: this.inboxes.log(target).map(entry => ({ ...entry, line: workLogLine(entry) })) };
+    }
     const board = this.board.read(target), items = board?.items ?? [];
     const readOnly = !!call.bot && target.key !== self.key && !self.task;
     if (call.item !== undefined) return { bot: name, item: items.find(entry => entry.key === call.item) ?? fail(`No item ${call.item} on that board.`), ...(readOnly ? { readOnly } : {}) };

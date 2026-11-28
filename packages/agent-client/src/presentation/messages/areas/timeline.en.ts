@@ -62,6 +62,7 @@ export const timeline = {
   'timeline.itemTag': 'Item {key} · {title}',
   'timeline.itemKey': 'Item {key}',
   'timeline.personAsks': 'The person asks from {from}',
+  'timeline.workLog': { one: 'Work log: {count} new entry', other: 'Work log: {count} new entries' },
   'timeline.botAnswered': '{bot} answered',
   'timeline.botAnswering': '{bot} is answering',
   'timeline.botAsked': 'You asked',

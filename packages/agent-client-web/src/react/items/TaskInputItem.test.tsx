@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { expect, it } from 'vitest';
-import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, joinTaskInputs, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
+import { BOT_INSTRUCTIONS_VERSION, appendSessionReferences, assistantMessageText, chiefChangedText, itemChangedText, itemTagText, joinTaskInputs, workLogText, personWroteText, standingInstructionsText, roomTurnText, taskBriefText, timerText, taskResultText, taskUpdateText } from '@orchardworks/agent-remote-protocol';
 import { TaskDirectoryContext } from '../TaskDirectory.js';
 import { render } from '../../test/setup.js';
 import { UserMessageItem } from './MessageItem.js';
@@ -50,6 +50,14 @@ it('folds what the person wrote to a bot into one quiet line that opens to their
   const folded = container.querySelector('details[data-person-wrote="QA"]')!;
   expect(folded.querySelector('summary')?.textContent).toBe('The person wrote to QA');
   expect(folded.textContent).toContain('Skip the flaky test.');
+  expect(container.querySelector('.agent-message-user')).toBeNull();
+});
+
+it('folds the work log a bot\'s main session is told of into one quiet line that opens to the entries', async () => {
+  const container = await render(<UserMessageItem item={message(workLogText({ lines: ['2026-11-28 10:00 · in "Notes" · the person asked: Ready? → Yes.'], total: 1 }))} />);
+  const folded = container.querySelector('details[data-work-log-new="1"]')!;
+  expect(folded.querySelector('summary')?.textContent).toBe('Work log: 1 new entry');
+  expect(folded.textContent).toContain('Ready? → Yes.');
   expect(container.querySelector('.agent-message-user')).toBeNull();
 });
 

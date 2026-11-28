@@ -3,7 +3,7 @@ import { NativeSessionRef } from './session-succession.js';
 import { Value } from '@sinclair/typebox/value';
 import { ATTACHMENT_CHUNK_BYTES, ATTACHMENTS_PER_MESSAGE, AttachmentId, BotAttachment, BotId, BotFact, BotMission, BotName, Board, BOARD_ITEM_LIMIT, BOARD_PLAN_LIMIT, BoardItem, BoardItemEdit, BoardPlanEdit, BotTimer } from './bots.js';
 import { ChainId, StandingApproval, TurnCause } from './chains.js';
-import { TaskBrief, ASK_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
+import { TaskBrief, ASK_LIMIT, WORK_LOG_KEEP, WORK_LOG_QUESTION_LIMIT, WORK_LOG_ANSWER_LIMIT, TaskOwner, TaskWorkspace, AssistantMessageId, ASSISTANT_MESSAGE_LIMIT, ROOM_MINUTES_LIMIT, ROOM_TRANSCRIPT_LIMIT, ROOM_TURN_LIMIT, TaskOutcome, TaskTitle, TeamTask, TASK_BRIEF_LIMIT, TASK_SUMMARY_LIMIT, TASK_TOLD_LIMIT, SUB_SESSION_LINE_LIMIT, SUB_SESSION_NAME_LIMIT, isTeamTask } from './task.js';
 const object = { additionalProperties: false } as const;
 const id = Type.String({ minLength: 1, maxLength: 256 });
 const short = Type.String({ maxLength: 2048 });
@@ -56,6 +56,10 @@ export type TeamUnresolvedReceipt = Static<typeof TeamUnresolvedReceipt>;
 export const TeamLink = Type.Object({ assistants: Type.Tuple([id, id]),
   recent: Type.Array(Type.Object({ id: AssistantMessageId, from: id, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id }, object), { maxItems: 64 }) }, object);
 export type TeamLink = Static<typeof TeamLink>;
+/** One thing a bot's answer session did, for its main session: seq grows by one per entry; the log keeps the latest `WORK_LOG_KEEP`. */
+export const WorkLogEntry = Type.Object({ seq: Type.Integer({ minimum: 1 }), at: Type.Number(), where: Type.String({ minLength: 1, maxLength: 256 }),
+  question: Type.String({ minLength: 1, maxLength: WORK_LOG_QUESTION_LIMIT }), answer: Type.String({ minLength: 1, maxLength: WORK_LOG_ANSWER_LIMIT }) }, object);
+export type WorkLogEntry = Static<typeof WorkLogEntry>;
 /**
  * One bot's inbox (bots design 3): its main session as the only seat, bound where it is. Whatever reaches the bot arrives here as a
  * message the Relay framed, delivered between turns. `instructions`: the hash of the standing instructions it was last sent.
@@ -65,6 +69,8 @@ export const TeamInbox = Type.Object({ botId: BotId, instructions: Type.Optional
   recent: Type.Optional(Type.Array(Type.Object({ id: AssistantMessageId, from: BotId, hop: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }), operationId: id,
     /** The bot answered its sender during the turn this message started, so that turn's final text sends no reply. */
     answered: Type.Optional(Type.Literal(true)) }, object), { maxItems: 64 })),
+  /** The work log: what its answer sessions did elsewhere, oldest first. `logSeen`: the last seq its main session was told of. */
+  worklog: Type.Optional(Type.Array(WorkLogEntry, { maxItems: WORK_LOG_KEEP })), logSeen: Type.Optional(Type.Integer({ minimum: 0 })),
   /** The person paused the bot: its messages wait until resumed (bots design 7). */
   paused: Type.Optional(Type.Literal(true)),
   /** The bot's board and timers (bots design 6). */
@@ -219,7 +225,7 @@ export const TeamHostCall = Type.Union([
   // A standing bot's chief moves it to another standing bot, or to the person (`chief` person).
   Type.Object({ action: Type.Literal('set_chief'), owner: BotCaller, bot: Type.String({ minLength: 1, maxLength: 300 }), chief: Type.String({ minLength: 1, maxLength: 300 }) }, object),
   // A bot reads its own board, or the board of a standing bot it is chief of (read only); item names one item with its whole brief.
-  Type.Object({ action: Type.Literal('board'), owner: BotCaller, bot: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), item: Type.Optional(BoardItem.properties.key) }, object),
+  Type.Object({ action: Type.Literal('board'), owner: BotCaller, bot: Type.Optional(Type.String({ minLength: 1, maxLength: 300 })), item: Type.Optional(BoardItem.properties.key), workLog: Type.Optional(Type.Literal(true)) }, object),
   // Every write names the version it read (bots design 6.1). A new item names none; `assignee` is a bot by name or id, or self. parent null clears it.
   Type.Object({ action: Type.Literal('update_board'), owner: BotCaller,
     items: Type.Optional(Type.Array(BoardItemEdit, { minItems: 1, maxItems: 10 })), plan: Type.Optional(BoardPlanEdit) }, object),

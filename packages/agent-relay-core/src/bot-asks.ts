@@ -13,6 +13,7 @@ import { pruneCoordination } from './coordination-retention.js';
 import { chainScope } from './chain-scope.js';
 import { personChainId, type BotChains } from './chains.js';
 import { cutReply } from './reply-text.js';
+import type { BotInboxes } from './inboxes.js';
 
 const fail = (message: string): never => { throw new Error(message); };
 const fold = (text: string) => text.trim().toLocaleLowerCase('en');
@@ -21,7 +22,7 @@ const NOT_FOUND = 'No bot of this account answers to that name.';
 
 export class BotAsks {
   private timer: unknown;
-  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly chains: BotChains) {}
+  constructor(private readonly broker: AssistantBrokerPorts, private readonly ports: AssistantPorts, private readonly chains: BotChains, private readonly inboxes: BotInboxes) {}
   private key(hostId: string, providerId: string, nativeSessionId: string): string | undefined {
     try { return nativeSessionRefKey(this.broker.ports.resolveSession(hostId, providerId, nativeSessionId)); } catch { return undefined; }
   }
@@ -98,7 +99,11 @@ export class BotAsks {
     const text = cutReply(call.text, bot?.name ?? 'the bot');
     await this.broker.change(teams => {
       const current = teams.find(item => item.id === team.id), now = this.broker.ports.now();
-      for (const entry of current?.ask?.entries ?? []) if (!entry.answer) entry.answer = { text, at: now };
+      for (const entry of current?.ask?.entries ?? []) if (!entry.answer) {
+        entry.answer = { text, at: now };
+        // What the person asked and the bot answered elsewhere goes in the bot's work log, which its main session is told of with its next input.
+        if (bot) this.inboxes.appendLog(teams, bot, now, { where: current!.ask!.from.name, question: entry.text, answer: text });
+      }
       if (current) { current.revision++; current.updatedAt = now; }
     });
     return { outcome: 'delivered' };

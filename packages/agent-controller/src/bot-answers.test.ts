@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ProviderObservation } from '@orchardworks/agent-provider-sdk';
-import { askText, parseTaskInputs } from '@orchardworks/agent-remote-protocol';
+import { askText, assistantMessageText, standingInstructionsText, workLogText, parseTaskInputs } from '@orchardworks/agent-remote-protocol';
 import { botsHarness } from './test-utils/bots-harness.js';
 import { boundary, ScriptedSession } from './test-utils/journal-scripted-session.js';
 import { watchChainTurns, inputCause } from './session-core/chain-turns.js';
@@ -86,7 +86,7 @@ describe('an answer session on the Controller', () => {
     const [entry] = h.team(team.id).ask!.entries;
     expect(entry!.answer!.text).toBe('Two releases shipped.');
     // The question was the person's, not the bot's own: its chief is not told the person wrote to it.
-    expect(h.teams().filter(item => item.inbox)).toEqual([]);
+    expect(h.teams().filter(item => item.inbox).flatMap(item => item.messages).filter(message => message.text.startsWith('[The person wrote to'))).toEqual([]);
     const [chain] = h.broker.chains.list();
     expect(chain).toMatchObject({ cause: 'person', bot: trackerId, turns: 1 });
   });
@@ -97,5 +97,39 @@ describe('an answer session on the Controller', () => {
     expect(inputCause({ text: `${ask}\n\n${askText({ from: 'Notes', text: 'Two?' })}` })).toEqual({ kind: 'framed', asked: true });
     expect(inputCause({ text: '[The person asks from Notes] one line' })).toMatchObject({ kind: 'person' });
     expect(inputCause({ text: 'What shipped?', messageId: 'm1' })).toEqual({ kind: 'person', messageId: 'm1' });
+  });
+
+  it('reads the standing instructions and the work log ahead of one message as the message alone: the turn\'s final text still answers it', () => {
+    const message = assistantMessageText({ messageId: 'm0123456789ab', from: 'Chief', body: 'Status?' });
+    const log = workLogText({ lines: ['2026-11-28 10:00 · in "Notes" · the person asked: Ready? → Yes.'], total: 1 });
+    expect(inputCause({ text: [standingInstructionsText(undefined), log, message].join('\n\n') })).toEqual({ kind: 'framed', answers: 'm0123456789ab' });
+  });
+
+  it('tells the main session of what the answer session answered with the next input it is given, and the bot reads the log', async () => {
+    const { h, mention } = await setup();
+    await mention('What shipped last week?');
+    await h.runtime.tick();
+    const ref = h.ref('codex', 'native-0');
+    const tools = new BotTools({ request: call => h.host(call), tasks: () => true, answering: candidate => h.runtime.answering(candidate) });
+    const session = new ScriptedSession('codex', 'native-0', [boundary()]);
+    void (async () => { for await (const _ of watchChainTurns(session, ref, tools.causes, turn => tools.turnEnded(ref, turn), written => tools.personWrote(ref, written)).observe()) { /* watched */ } })();
+    session.push(input(h.sessions.get('native-0')!.deliveries[0]!.text));
+    session.push(said('Two releases shipped.'));
+    session.push(done());
+    await settle();
+    // The main session has heard nothing yet; Chief's message reaches it with the log in front.
+    expect(h.sessions.get('tracker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []).some(item => item.kind === 'work_log')).toBe(false);
+    await h.host({ action: 'bot_enablement' });
+    await h.host({ action: 'bot_message', owner: { providerId: 'codex', nativeSessionId: 'worker' }, operationId: 'm1', to: 'Tracker', text: 'Status?' });
+    await h.runtime.tick();
+    const kinds = h.sessions.get('tracker')!.deliveries.flatMap(delivery => parseTaskInputs(delivery.text) ?? []);
+    expect(kinds.map(item => item.kind)).toEqual(expect.arrayContaining(['work_log', 'assistant']));
+    expect(kinds.find(item => item.kind === 'work_log')).toMatchObject({ count: 1, body: expect.stringContaining('What shipped last week? → Two releases shipped.') });
+    expect(kinds.findIndex(item => item.kind === 'work_log')).toBeLessThan(kinds.findIndex(item => item.kind === 'assistant'));
+    // The bot reads the whole log with board.
+    const board = new BotTools({ request: call => h.host(call), tasks: () => true, title: async () => 'Tracker' });
+    await board.refresh('controller');
+    const read = JSON.parse(await board.namespace(() => h.ref('codex', 'tracker'), false).tools.find(item => item.name === 'board')!.execute({ work_log: true }) as string);
+    expect(read.workLog).toEqual([expect.objectContaining({ where: 'Notes', question: 'What shipped last week?', answer: 'Two releases shipped.' })]);
   });
 });

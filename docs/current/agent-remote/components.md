@@ -30,6 +30,7 @@ new file and a row here.
 | Provider conformance kit | [provider-conformance-kit.md](components/provider-conformance-kit.md) |
 | Native assumption checks | [native-assumption-checks.md](components/native-assumption-checks.md) |
 | Navigation stack of Bot mode | [navigation-stack.md](components/navigation-stack.md) |
+| Bot workbench | [bot-workbench.md](components/bot-workbench.md) |
 
 Every clause now names the tests that prove it (220 clauses on 2026-11-22, without the CLI simulator's). The 43 gaps were closed on 2026-11-21 (each component's "Gaps closed"): 42 by a
 unit test, a vector row or a seam test with mock data, each under 300 ms and each failing when the rule it proves is broken (by a

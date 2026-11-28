@@ -314,3 +314,16 @@ independent of each other after W3 and can run in parallel; W5 follows W3.
 10. **Should the primary bot's workbench be a home destination** (the app opening on it)? Out of scope; the roster and Windows entries come first.
 11. **Staff workbench creation on first open** writes a Window per staff bot used. Recommend yes, lazily, hidden from the Bot roster, named by the bot.
 12. **The CLI handoff `--window`** returns for free workbenches with this design unchanged; confirm that a bound workbench is not a default target.
+
+## 12. As built (feat/workbench)
+
+Built as designed, with these differences. Main moved to Controller 0.3.10 while the design waited (`read_sub_session`, the timer's roster, CLI link and QR handoff); none of it touches the workbench, which reads the same Teams.
+
+- The rebind of the main tile after a handoff was dropped: the bot keeps its conversation (rule 1) and each Window's succession follows a handed-off session already, so the tile needs no extra write. `rebindWorkbenchMain` was removed.
+- The main session that owns sub-sessions is the bot's inbox seat (its current main session), with the tile's binding as the fallback while the inbox is unknown.
+- The open choice (new, bind, unbind) lives in `BotWorkbenchProvider` and is requested through a ref, so opening it does not render the whole page.
+- The folded Ended and Answers groups are strips of the rail; a row opens its tile (held while selected, as the hold rule says); an opened answer session is read only and stays until folded.
+- Opening a native subagent from a derived tile keeps the tile first, since an attached view needs a stored parent.
+- The phone list is the whole phone workbench; a free workbench keeps the tile stack. Its Back is the page's history (one entry per pushed screen).
+- Teams (tasks, inboxes, answer sessions) are stored on the device (`kernel/team-roster-store.ts`) and stand in until the Relay answers, which is the offline first frame (W7). The roster refreshes every 4 s while a bot workbench is open.
+- Not built: the Window menu's Bind and Unbind on a phone (the Windows list has no row menu for them); the stored tiles do not yet show their sub-session state as a badge.

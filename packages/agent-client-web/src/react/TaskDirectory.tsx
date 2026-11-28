@@ -39,6 +39,8 @@ export interface TaskDirectory {
   routinesOf?(botId: string): readonly Routine[] | undefined;
   /** The account's unattended work as the Relay reports it now (time zone, pause, budget, usage), read when a bot's details are open. */
   unattendedOf?(): Promise<UnattendedView | undefined>;
+  /** The person changes the account's unattended settings (a bot's own pause, for one); the Relay merges the patch. */
+  setUnattended?(patch: Extract<ChainAction, { action: 'set_unattended' }>['patch']): Promise<void>;
   /** The person's own routine operations on a standing bot (set, pause, delete, test), then the roster follows. */
   routineAct?(action: Extract<ChainAction, { action: 'routine_set' | 'routine_pause' | 'routine_delete' | 'routine_test' }>): Promise<void>;
   /** Who manages a standing bot now (undefined: the person) and the standing bots it may be moved to. */

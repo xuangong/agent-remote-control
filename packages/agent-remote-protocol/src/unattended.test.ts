@@ -4,6 +4,7 @@ import { dayKey, estimateCost, isUnattendedState, priceOf, SHIPPED_DEFAULT_PRICE
 describe('the price of a model', () => {
   it('finds the shipped row by the model id, the dearer Opus generation apart from the cheaper', () => {
     expect(priceOf('claude-opus-4-5').rates).toMatchObject({ input: 5, output: 25 });
+    expect(priceOf('claude-opus-5.5').rates).toMatchObject({ input: 3, output: 15 });
     expect(priceOf('claude-opus-4-1').rates).toMatchObject({ input: 15, output: 75 });
     expect(priceOf('sonnet').rates).toMatchObject({ input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 });
     expect(priceOf('claude-haiku-4-5').rates).toMatchObject({ input: 1, output: 5 });
@@ -34,6 +35,21 @@ describe('the estimated cost of a turn', () => {
     expect(estimateCost({ model: 'sonnet' }, 2e6)).toEqual({ usd: 6, tokens: 2e6, flags: ['no breakdown'] });
     expect(estimateCost(undefined, 0)).toEqual({ usd: 15 * 0, tokens: 0, flags: ['price unknown', 'no usage reported'] });
     expect(estimateCost({ model: 'mystery', input: 1e6 }, undefined).flags).toEqual(['price unknown', 'cache writes not reported']);
+  });
+});
+
+describe('the estimate against what Claude Code reported', () => {
+  // Two real turns of a claude-opus-5.5 bot (the session's own transcript, deduplicated by request), and the cost Claude Code reported for each.
+  const turns = [{ usage: { model: 'claude-opus-5.5', input: 8, cacheCreation: 9_426, cachedInput: 60_965, output: 354 }, reported: 0.066435 },
+    { usage: { model: 'claude-opus-5.5', input: 10, cacheCreation: 2_133, cachedInput: 75_507, output: 279 }, reported: 0.031386 }];
+  it('lands within 30% of the CLI\'s figure for each turn, which Opus 4.5 rates did not (1.5 to 1.9 times too high)', () => {
+    for (const { usage, reported } of turns) {
+      const ours = estimateCost(usage, undefined);
+      expect(ours.flags).toEqual([]);
+      expect(ours.usd / reported).toBeGreaterThan(0.7); expect(ours.usd / reported).toBeLessThan(1.3);
+      const older = (usage.input * 5 + usage.cacheCreation * 6.25 + usage.cachedInput * 0.5 + usage.output * 25) / 1e6;
+      expect(older / reported).toBeGreaterThan(1.3);
+    }
   });
 });
 

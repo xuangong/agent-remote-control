@@ -2,6 +2,7 @@ import { useContext, useState, type FormEvent } from 'react';
 import { ROUTINE_PROMPT_LIMIT, ROUTINE_MAX_EVERY_MINUTES, ROUTINE_MIN_EVERY_MINUTES, ROUTINE_MAX_QUIET_MINUTES, localTime, zonedInstant, type Routine, type RoutineSchedule } from '@orchardworks/agent-remote-protocol';
 import { costWords, nextRunWords, runWords, scheduleWords, weekdayName } from '@orchardworks/agent-client';
 import { LocaleContext, useTranslate } from '@orchardworks/agent-client-web/react';
+import { Toggle } from '@orchardworks/agent-client-web/primitives';
 
 /** What the person saves of a routine: the fields `routine_set` takes. */
 export interface RoutineSpec { name: string; schedule: RoutineSchedule; prompt?: string; model?: string; maxRunsPerDay?: number; untilMinutes?: number }
@@ -12,6 +13,11 @@ export interface RoutinesChoice {
   readonly zone: string;
   /** Why no unattended start happens now (paused, budget, provider limit, absence), for the next-run line. */
   readonly hold?: string;
+  /** The models this bot's provider offers; a routine's model is one of them. Absent: the provider lists none, and the field is free text. */
+  readonly models?: readonly { readonly value: string; readonly label: string }[];
+  /** This bot's own unattended pause, and the person's switch for it. */
+  readonly botPaused?: boolean;
+  pauseBot?(paused: boolean): Promise<void>;
   save(spec: RoutineSpec): Promise<void>;
   pause(name: string, paused: boolean): Promise<void>;
   remove(name: string): Promise<void>;
@@ -60,10 +66,12 @@ export function RoutinesList({ choice }: { choice: RoutinesChoice }) {
   };
   const now = Date.now();
   return <div className="lab-assistant-process lab-routines">
+    {choice.pauseBot ? <div className="lab-assistant-row"><span>{t('routines.botPause')}<small className="lab-assistant-hint">{t('routines.botPause.hint')}</small></span>
+      <Toggle label={t('routines.botPause')} checked={!!choice.botPaused} onChange={paused => void run(() => choice.pauseBot!(paused))} /></div> : null}
     {choice.routines.length ? <ul className="lab-assistant-memory lab-routines-list">{choice.routines.map(routine => {
       const last = routine.runs.at(-1), average = routine.runs.filter(item => item.usd !== undefined).slice(-5), cost = average.length ? average.reduce((sum, item) => sum + item.usd!, 0) / average.length : undefined;
       return <li key={routine.id} data-routine={routine.name} data-paused={routine.paused ? '' : undefined}>
-        {editing?.name === routine.name ? <RoutineForm routine={routine} zone={choice.zone} busy={busy} cancel={() => setEditing(undefined)} save={spec => run(async () => { await choice.save(spec); setEditing(undefined); })} /> : <>
+        {editing?.name === routine.name ? <RoutineForm routine={routine} zone={choice.zone} models={choice.models} busy={busy} cancel={() => setEditing(undefined)} save={spec => run(async () => { await choice.save(spec); setEditing(undefined); })} /> : <>
           <span className="lab-assistant-session-title">{routine.name}</span>
           <small>{scheduleWords(routine.schedule, choice.zone, locale, t)} · {nextRunWords(routine, now, choice.zone, locale, t, choice.hold)}</small>
           <small>{[t(`routines.by.${routine.by}` as const), ...(routine.model ? [t('routines.model.is', { model: routine.model })] : []), ...(cost !== undefined ? [t('routines.cost.each', { cost: costWords(cost, locale) })] : [])].join(' · ')}</small>
@@ -80,14 +88,14 @@ export function RoutinesList({ choice }: { choice: RoutinesChoice }) {
         </>}
       </li>;
     })}</ul> : editing ? null : <p className="lab-assistant-empty">{t('routines.empty')}</p>}
-    {editing && editing.name === undefined ? <RoutineForm zone={choice.zone} busy={busy} cancel={() => setEditing(undefined)} save={spec => run(async () => { await choice.save(spec); setEditing(undefined); })} /> :
+    {editing && editing.name === undefined ? <RoutineForm zone={choice.zone} models={choice.models} busy={busy} cancel={() => setEditing(undefined)} save={spec => run(async () => { await choice.save(spec); setEditing(undefined); })} /> :
       editing ? null : <button type="button" className="lab-assistant-action" onClick={() => setEditing({})}>{t('routines.new')}</button>}
     {failed ? <p role="alert">{failed}</p> : null}
     <p className="lab-assistant-hint">{t('routines.hint')}</p>
   </div>;
 }
 
-function RoutineForm({ routine, zone, busy, save, cancel }: { routine?: Routine; zone: string; busy: boolean; save(spec: RoutineSpec): void; cancel(): void }) {
+function RoutineForm({ routine, zone, models, busy, save, cancel }: { routine?: Routine; zone: string; models: RoutinesChoice['models']; busy: boolean; save(spec: RoutineSpec): void; cancel(): void }) {
   const t = useTranslate(), locale = useContext(LocaleContext);
   const [draft, setDraft] = useState(() => draftOf(routine, zone));
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) => setDraft(current => ({ ...current, [key]: value }));
@@ -102,7 +110,10 @@ function RoutineForm({ routine, zone, busy, save, cancel }: { routine?: Routine;
       onClick={() => set('days', draft.days.includes(day) ? draft.days.filter(item => item !== day) : [...draft.days, day])}>{weekdayName(day, locale)}</button>)}</fieldset> : null}
     {draft.kind === 'once' ? <label>{t('routines.at')}<input type="datetime-local" value={draft.at} onChange={event => set('at', event.target.value)} /></label> : null}
     <label>{t('routines.prompt')}<textarea rows={3} maxLength={ROUTINE_PROMPT_LIMIT} value={draft.prompt} onChange={event => set('prompt', event.target.value)} /></label>
-    <label>{t('routines.model')}<input value={draft.model} maxLength={256} onChange={event => set('model', event.target.value)} /></label>
+    <label>{t('routines.model')}{models?.length
+      ? <select value={draft.model} onChange={event => set('model', event.target.value)}><option value="">{t('routines.model.own')}</option>
+        {[...models, ...(draft.model && !models.some(item => item.value === draft.model) ? [{ value: draft.model, label: draft.model }] : [])].map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select>
+      : <input value={draft.model} maxLength={256} onChange={event => set('model', event.target.value)} />}</label>
     <label>{t('routines.maxRuns')}<input type="number" inputMode="numeric" min={1} max={200} value={draft.maxRuns} onChange={event => set('maxRuns', event.target.value)} /></label>
     <span className="lab-assistant-task-actions">
       <button type="submit" className="lab-assistant-action" disabled={busy || !spec}>{t('routines.save')}</button>

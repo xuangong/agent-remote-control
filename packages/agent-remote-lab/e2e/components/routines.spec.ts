@@ -24,6 +24,7 @@ test('reads each routine as schedule, next run, who set it and its last run, and
   expect(await fitsWidth(page)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('routines.png'), fullPage: true });
 
+  await routines.getByRole('switch', { name: "Pause this bot's unattended work" }).click();
   await row('Morning check').getByRole('button', { name: 'Test', exact: true }).click();
   await row('Morning check').getByRole('button', { name: 'History', exact: true }).click();
   await expect(row('Morning check').locator('ol li')).toHaveCount(3);
@@ -31,7 +32,7 @@ test('reads each routine as schedule, next run, who set it and its last run, and
   await page.keyboard.press('Enter');
   await row('Quarter check').getByRole('button', { name: 'Delete', exact: true }).click();
   await expect(row('Quarter check')).toHaveCount(0);
-  expect(await actions(page)).toEqual([{ test: 'Morning check' }, { pause: ['Weekly summary', false] }, { remove: 'Quarter check' }]);
+  expect(await actions(page)).toEqual([{ pauseBot: true }, { test: 'Morning check' }, { pause: ['Weekly summary', false] }, { remove: 'Quarter check' }]);
   expect(await fitsWidth(page)).toBe(true);
 });
 
@@ -44,11 +45,13 @@ test('makes a routine from the form with native fields, from the keyboard, and s
   await form.getByLabel('Name').fill('Standup');
   await form.getByLabel('When').selectOption('daily');
   await form.getByLabel('Time').fill('09:15');
+  await expect(form.getByLabel('Model').locator('option')).toHaveText(["Bot's own model", 'Default', 'Sonnet', 'Haiku']);
+  await form.getByLabel('Model').selectOption('haiku');
   await form.getByLabel('What to do').fill('Summarise yesterday.');
   expect(await fitsWidth(page)).toBe(true);
   await form.getByLabel('Name').press('Enter');
   await expect(routines.locator('li[data-routine="Standup"]')).toContainText('Every day at 09:15');
-  expect(await actions(page)).toEqual([{ save: { name: 'Standup', schedule: { kind: 'daily', time: '09:15' }, prompt: 'Summarise yesterday.' } }]);
+  expect(await actions(page)).toEqual([{ save: { name: 'Standup', schedule: { kind: 'daily', time: '09:15' }, prompt: 'Summarise yesterday.', model: 'haiku' } }]);
 });
 
 test('shows the budget, what was used, the cap reached and the provider window, and saves the caps', async ({ page }, testInfo) => {

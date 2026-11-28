@@ -30,6 +30,8 @@ export interface BotToolsPorts {
   workerSeat?(ref: NativeSessionRef): { teamId: string; memberId: string } | undefined;
   /** Answers a pending interaction of a session on this Host, as the person's decision applied. */
   answer?(ref: NativeSessionRef, requestId: string, response: AgentInteractionResponse): Promise<void>;
+  /** The models the session's provider offers (its `model` session setting), or undefined when it lists none; a routine's model is one of them. */
+  models?(ref: NativeSessionRef): Promise<string[] | undefined>;
   /** The commit checked out in a session's working directory, where a worktree task starts. */
   head?(ref: NativeSessionRef): Promise<string>;
   /** The provider keeps a session it starts from writing its working directory. */
@@ -312,13 +314,13 @@ export class BotTools {
       tool('read_page', 'Read a page: with page_id its title and contents, without it the list of pages (id, title, version, updated). bot: the pages of another bot of this account (default: yours); every page is readable, only its bot writes it.',
         object({ page_id: { type: 'string', pattern: '^pg_[0-9a-f]{12}$' }, bot: { type: 'string', minLength: 1, maxLength: 300 } }, []),
         args => taskRequest({ action: 'read_page', owner: caller(), ...(args.page_id ? { pageId: args.page_id } : {}), ...(args.bot ? { bot: args.bot } : {}) })),
-      tool('set_routine', 'Set a named routine of yours (replacing the one of that name): a prompt you get on a schedule, or after quiet. Give exactly one of: quiet_minutes (reminds you after that many minutes of quiet; every message that reaches you pushes it back, so it only fires when nothing happens; use it to look after work that waits on others, and while you have open board items a default one reminds you of them), every_minutes (5 to 1440), daily_at ("HH:MM" in the person\'s time zone), weekdays with at (days 1 Monday to 7 Sunday and "HH:MM"), or in_minutes (once). prompt is what to do when it fires. model names the model its runs use, if not yours. until_minutes ends the routine by itself after that many minutes from now. max_runs_per_day caps its runs. It takes effect at once and the person sees it in your details. You cannot set routines from a run of a routine; there you may pause or delete them.',
+      tool('set_routine', 'Set a named routine of yours (replacing the one of that name): a prompt you get on a schedule, or after quiet. Give exactly one of: quiet_minutes (reminds you after that many minutes of quiet; every message that reaches you pushes it back, so it only fires when nothing happens; use it to look after work that waits on others, and while you have open board items a default one reminds you of them), every_minutes (5 to 1440), daily_at ("HH:MM" in the person\'s time zone), weekdays with at (days 1 Monday to 7 Sunday and "HH:MM"), or in_minutes (once). prompt is what to do when it fires. model names the model its runs use, if not yours: one of the models your provider offers, and another is refused with the list. until_minutes ends the routine by itself after that many minutes from now. max_runs_per_day caps its runs. It takes effect at once and the person sees it in your details. You cannot set routines from a run of a routine; there you may pause or delete them.',
         object({ name: { type: 'string', minLength: 1, maxLength: 60 }, quiet_minutes: { type: 'integer', minimum: 1, maximum: 10080 }, every_minutes: { type: 'integer', minimum: 5, maximum: 1440 },
           daily_at: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' }, weekdays: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7 }, at: { type: 'string', pattern: '^([01][0-9]|2[0-3]):[0-5][0-9]$' },
           in_minutes: { type: 'integer', minimum: 1, maximum: 525600 }, prompt: { type: 'string', minLength: 1, maxLength: ROUTINE_PROMPT_LIMIT }, model: { type: 'string', minLength: 1, maxLength: 256 },
           until_minutes: { type: 'integer', minimum: 1, maximum: 43200 }, max_runs_per_day: { type: 'integer', minimum: 1, maximum: 200 } }, ['name']),
-        args => taskRequest({ action: 'set_routine', owner: caller(), name: args.name, schedule: routineSchedule(args, Date.now()), ...(args.prompt !== undefined ? { prompt: args.prompt } : {}), ...(args.model !== undefined ? { model: args.model } : {}),
-          ...(args.max_runs_per_day !== undefined ? { maxRunsPerDay: args.max_runs_per_day } : {}), ...(args.until_minutes !== undefined ? { untilMinutes: args.until_minutes } : {}), ...cause() })),
+        async args => { await checkModel(this.ports, worker(), args.model as string | undefined); return taskRequest({ action: 'set_routine', owner: caller(), name: args.name, schedule: routineSchedule(args, Date.now()), ...(args.prompt !== undefined ? { prompt: args.prompt } : {}), ...(args.model !== undefined ? { model: args.model } : {}),
+          ...(args.max_runs_per_day !== undefined ? { maxRunsPerDay: args.max_runs_per_day } : {}), ...(args.until_minutes !== undefined ? { untilMinutes: args.until_minutes } : {}), ...cause() }); }),
       tool('list_routines', 'List your routines: name, schedule, next due time, paused, and the last runs of each.', object({}, []), () => taskRequest({ action: 'list_routines', owner: caller() })),
       tool('pause_routine', 'Pause one of your routines (paused true) or resume it (paused false).', object({ name: { type: 'string', minLength: 1, maxLength: 60 }, paused: { type: 'boolean' } }, ['name', 'paused']),
         args => taskRequest({ action: 'pause_routine', owner: caller(), name: args.name, paused: args.paused })),
@@ -351,4 +353,11 @@ function routineSchedule(args: Record<string, unknown>, now: number): RoutineSch
   if (args.daily_at !== undefined) return { kind: 'daily', time: args.daily_at as string };
   if (args.weekdays !== undefined) return { kind: 'weekdays', days: args.weekdays as number[], time: typeof args.at === 'string' ? args.at : fail('weekdays needs at ("HH:MM").') };
   return { kind: 'once', at: now + (args.in_minutes as number) * 60_000 };
+}
+
+/** A routine's model must be one the session's provider offers; the answer lists them, so the bot chooses again without guessing. */
+async function checkModel(ports: BotToolsPorts, ref: NativeSessionRef, model: string | undefined): Promise<void> {
+  if (model === undefined) return;
+  const offered = await ports.models?.(ref).catch(() => undefined);
+  if (offered?.length && !offered.includes(model)) throw new Error(`"${model}" is not a model this provider offers. Choose one of: ${offered.join(', ')}.`);
 }

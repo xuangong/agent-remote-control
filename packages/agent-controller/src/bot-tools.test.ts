@@ -60,8 +60,8 @@ it('returns the outcome of a message to the bot as the tool result, whichever of
 });
 
 describe('the routine tools', () => {
-  const routineTools = () => {
-    const calls: TeamHostCall[] = [], tools = new BotTools({ request: async call => { calls.push(call); return { routines: [] }; }, tasks: () => true });
+  const routineTools = (models?: string[]) => {
+    const calls: TeamHostCall[] = [], tools = new BotTools({ request: async call => { calls.push(call); return { routines: [] }; }, tasks: () => true, ...(models ? { models: async () => models } : {}) });
     const tool = (name: string) => tools.namespace(() => ref('chief'), false).tools.find(item => item.name === name)!;
     return { calls, tool };
   };
@@ -82,6 +82,16 @@ describe('the routine tools', () => {
     await expect(set.execute({ name: 'G' })).rejects.toThrow('exactly one');
     await expect(set.execute({ name: 'H', weekdays: [1] })).rejects.toThrow('at');
     expect(calls).toHaveLength(5);
+  });
+  it('takes a routine\'s model only from the models the provider offers, and says which when it is another', async () => {
+    const { calls, tool } = routineTools(['default', 'sonnet', 'haiku']);
+    await tool('set_routine').execute({ name: 'A', every_minutes: 10, model: 'haiku' });
+    await expect(tool('set_routine').execute({ name: 'B', every_minutes: 10, model: 'claude-haiku-4-5' })).rejects.toThrow('Choose one of: default, sonnet, haiku.');
+    expect(calls).toHaveLength(1);
+    // A provider that lists no models cannot be checked, so the choice stands.
+    const open = routineTools();
+    await open.tool('set_routine').execute({ name: 'C', every_minutes: 10, model: 'anything' });
+    expect(open.calls).toHaveLength(1);
   });
   it('lists, pauses and deletes by name, and has no tool to set an event routine', async () => {
     const { calls, tool } = routineTools();

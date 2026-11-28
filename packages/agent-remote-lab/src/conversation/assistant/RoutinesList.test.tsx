@@ -74,6 +74,28 @@ describe('a bot\'s routines in its details', () => {
   });
 });
 
+describe('a bot\'s model and pause in the routines', () => {
+  it('offers the models the provider lists in the form, keeps one the list no longer has, and saves the chosen one', async () => {
+    const c = choice([routine({ model: 'retired-model' })], { models: [{ value: 'default', label: 'Default' }, { value: 'haiku', label: 'Haiku' }] });
+    const container = await render(<RoutinesList choice={c.value} />);
+    await click(button(container, 'Edit'));
+    const select = container.querySelector('form select:not(:first-of-type), form label select[value], form select') as HTMLSelectElement;
+    const model = [...container.querySelectorAll('form label')].find(item => item.textContent!.startsWith('Model'))!.querySelector('select') as HTMLSelectElement;
+    expect([...model.options].map(option => option.value)).toEqual(['', 'default', 'haiku', 'retired-model']);
+    expect(select).toBeTruthy();
+    await type(model, 'haiku');
+    await click(button(container.querySelector('form')!, 'Save'));
+    expect(c.saved.at(-1)).toMatchObject({ name: 'Morning check', model: 'haiku' });
+  });
+  it('switches this bot\'s unattended work off and on', async () => {
+    const calls: boolean[] = [];
+    const container = await render(<RoutinesList choice={choice([routine()], { botPaused: false, pauseBot: async paused => { calls.push(paused); } }).value} />);
+    await click(container.querySelector('[role="switch"], input[type="checkbox"]'));
+    expect(calls).toEqual([true]);
+    expect(container.textContent).toContain('Pause this bot\'s unattended work');
+  });
+});
+
 describe('the form\'s schedule', () => {
   const draft = (extra: Record<string, unknown>) => ({ name: 'A', kind: 'every', minutes: '30', time: '09:00', days: [1], at: '', prompt: '', model: '', maxRuns: '', ...extra }) as Parameters<typeof specOf>[0];
   it('takes only what the Relay would take, and reads a once time in the person\'s zone', () => {

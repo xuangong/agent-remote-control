@@ -43,9 +43,12 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
     staffBoard: id => directory.boardOf?.(id), canOpen: id => directory.canOpenBot?.(id) ?? false, open: id => directory.openBot?.(id),
     ...(directory.writeBoard ? { save: edit => directory.writeBoard!(botId, edit) } : {}) } : undefined;
   const routinesOf = detailsShown && botId ? directory?.routinesOf?.(botId) : undefined;
-  const account = useAccountUnattended(routinesOf ? directory?.unattendedOf : undefined);
-  const hold = account?.settings.paused ? 'paused' : account?.absent ? 'absence' : account?.tripped.some(item => item.scope === 'account' || item.scope === botId) ? 'budget' : undefined;
-  const routines: RoutinesChoice | undefined = routinesOf && directory?.routineAct && botId ? { routines: routinesOf, zone: account?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, ...(hold ? { hold } : {}),
+  const [account, reloadAccount] = useAccountUnattended(routinesOf ? directory?.unattendedOf : undefined);
+  const botPaused = !!(botId && account?.settings.bots?.[botId]?.paused);
+  const models = state?.agent?.runtimeInfo.settings?.find(setting => setting.id === 'model' && setting.category === 'model')?.options.map(option => ({ value: option.value, label: option.label }));
+  const hold = account?.settings.paused ? 'paused' : account?.absent ? 'absence' : botPaused ? 'bot_paused' : account?.tripped.some(item => item.scope === 'account' || item.scope === botId) ? 'budget' : undefined;
+  const routines: RoutinesChoice | undefined = routinesOf && directory?.routineAct && botId ? { routines: routinesOf, zone: account?.timeZone ?? Intl.DateTimeFormat().resolvedOptions().timeZone, ...(hold ? { hold } : {}), botPaused, ...(models?.length ? { models } : {}),
+    ...(directory?.setUnattended ? { pauseBot: async (paused: boolean) => { await directory.setUnattended!({ bots: { [botId]: { paused } } }); reloadAccount(); } } : {}),
     save: spec => directory.routineAct!({ action: 'routine_set', botId, ...spec }), pause: (name, paused) => directory.routineAct!({ action: 'routine_pause', botId, name, paused }),
     remove: name => directory.routineAct!({ action: 'routine_delete', botId, name }), test: name => directory.routineAct!({ action: 'routine_test', botId, name }) } : undefined;
   useWatchTeamRoster(!!board);
@@ -83,8 +86,8 @@ export function ConversationDetails({ host, visible, state, details, assistant, 
 }
 
 /** The account's unattended work while a bot's routines are on screen: read when they open and once a minute after, while the page is visible. */
-function useAccountUnattended(load: (() => Promise<UnattendedView | undefined>) | undefined): UnattendedView | undefined {
-  const [view, setView] = useState<UnattendedView>();
+function useAccountUnattended(load: (() => Promise<UnattendedView | undefined>) | undefined): readonly [UnattendedView | undefined, () => void] {
+  const [view, setView] = useState<UnattendedView>(), [reads, setReads] = useState(0);
   useEffect(() => {
     if (!load) return;
     let live = true;
@@ -92,6 +95,6 @@ function useAccountUnattended(load: (() => Promise<UnattendedView | undefined>) 
     read();
     const timer = setInterval(() => { if (document.visibilityState === 'visible') read(); }, 60_000);
     return () => { live = false; clearInterval(timer); };
-  }, [load]);
-  return view;
+  }, [load, reads]);
+  return [view, () => setReads(count => count + 1)];
 }

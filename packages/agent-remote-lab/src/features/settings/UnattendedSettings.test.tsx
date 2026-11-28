@@ -39,11 +39,11 @@ describe('the unattended work settings', () => {
     await flush();
     const budget = container.querySelector('form[aria-label="Budget"]')!;
     expect((field(budget, 'Per day') ).value).toBe('5');
-    await type(field(budget, 'Per month'), '80'); await type(field(budget, 'Per run'), '2.5'); await type(field(budget, 'Runs a day'), '20');
+    await type(field(budget, 'Per month'), '80'); await type(field(budget, 'Runs a day'), '20');
     await click([...budget.querySelectorAll('button')].find(item => item.textContent === 'Save'));
-    await type(field(budget, 'Per day'), ''); await type(field(budget, 'Per month'), ''); await type(field(budget, 'Per run'), ''); await type(field(budget, 'Runs a day'), '');
+    await type(field(budget, 'Per day'), ''); await type(field(budget, 'Per month'), ''); await type(field(budget, 'Runs a day'), '');
     await click([...budget.querySelectorAll('button')].find(item => item.textContent === 'Save'));
-    expect(s.acted).toEqual([{ action: 'set_unattended', patch: { budget: { perDay: 5, perMonth: 80, perRun: 2.5, runsPerDay: 20 } } }, { action: 'set_unattended', patch: { budget: null } }]);
+    expect(s.acted).toEqual([{ action: 'set_unattended', patch: { budget: { perDay: 5, perMonth: 80, runsPerDay: 20 } } }, { action: 'set_unattended', patch: { budget: null } }]);
   });
   it('adds a model\'s rates and removes them, flags the models priced by default, and changes the time zone and the days away', async () => {
     const s = setup(view({ unpriced: ['my-local-model'], settings: { prices: { 'old-model': { input: 1, cacheWrite: 1, cacheRead: 0.1, output: 5 } } } }));

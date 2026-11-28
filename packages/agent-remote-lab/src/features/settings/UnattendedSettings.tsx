@@ -10,7 +10,7 @@ import { SettingsRow } from './SettingsRow.js';
 
 type SetUnattended = Extract<ChainAction, { action: 'set_unattended' }>['patch'];
 const REFRESH_MS = 15_000;
-const BUDGET_FIELDS = ['perDay', 'perMonth', 'perRun', 'runsPerDay'] as const;
+const BUDGET_FIELDS = ['perDay', 'perMonth', 'runsPerDay'] as const;
 const RATE_FIELDS = ['input', 'cacheWrite', 'cacheRead', 'output'] as const;
 
 /**

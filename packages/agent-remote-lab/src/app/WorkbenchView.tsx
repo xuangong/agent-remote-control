@@ -88,6 +88,7 @@ export function WorkbenchView({ scope }: { readonly scope: AppScope }) {
   const routineDirectory = useMemo(() => ({ ...tasksDirectory,
     routinesOf: (botId: string) => tasks?.find(team => team.inbox?.botId === botId && team.status === 'active')?.inbox?.routines ?? (tasks?.some(team => team.inbox?.botId === botId) ? [] : undefined),
     unattendedOf: () => chainClient.list().then(view => view.unattended),
+    setUnattended: async (patch: Parameters<NonNullable<TaskDirectory['setUnattended']>>[0]) => { await chainClient.act({ action: 'set_unattended', patch }); },
     routineAct: async (action: Parameters<NonNullable<TaskDirectory['routineAct']>>[0]) => {
       await chainClient.act(action);
       updateTaskRoster(baseUrl, (await taskClient.list()).filter(team => !!team.task || !!team.inbox || !!team.ask));

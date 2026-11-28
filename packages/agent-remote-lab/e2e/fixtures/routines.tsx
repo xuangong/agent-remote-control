@@ -34,7 +34,8 @@ const client = { list: async () => view(), act: async (action: ChainAction) => {
 function Details() {
   const [, bump] = useState(0);
   const change = async (record: unknown, apply: () => void) => { actions.push(record); apply(); bump(count => count + 1); };
-  return <main className="lab-settings lab-assistant-details-body" aria-label="Routines" style={{ padding: 16, maxWidth: 560 }}><RoutinesList choice={{ routines, zone: 'Asia/Shanghai', hold: 'budget',
+  return <main className="lab-settings lab-assistant-details-body" aria-label="Routines" style={{ padding: 16, maxWidth: 560 }}><RoutinesList choice={{ routines, zone: 'Asia/Shanghai', hold: 'budget', botPaused: false, models: [{ value: 'default', label: 'Default' }, { value: 'sonnet', label: 'Sonnet' }, { value: 'haiku', label: 'Haiku' }],
+    pauseBot: paused => change({ pauseBot: paused }, () => undefined),
     save: spec => change({ save: spec }, () => { routines = [...routines.filter(item => item.name !== spec.name), { ...base, id: spec.name, name: spec.name, by: 'person', schedule: spec.schedule, runs: [], ...(spec.prompt ? { prompt: spec.prompt } : {}) }]; }),
     pause: (name, paused) => change({ pause: [name, paused] }, () => { routines = routines.map(item => item.name === name ? (paused ? { ...item, paused: true as const } : (({ paused: _p, ...rest }) => rest)(item)) : item); }),
     remove: name => change({ remove: name }, () => { routines = routines.filter(item => item.name !== name); }),

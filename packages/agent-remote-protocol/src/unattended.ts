@@ -13,8 +13,8 @@ const usd = Type.Number({ minimum: 0, maximum: 1_000_000 });
 export const ModelRates = Type.Object({ input: usd, cacheWrite: usd, cacheRead: usd, output: usd }, strict);
 export type ModelRates = Static<typeof ModelRates>;
 
-/** The caps on unattended work in ≈$. perRun is a notice on a run's chain (a running run finishes); the others refuse new starts. */
-export const UnattendedBudget = Type.Object({ perDay: Type.Optional(usd), perMonth: Type.Optional(usd), perRun: Type.Optional(usd), runsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })) }, strict);
+/** The caps on unattended work in ≈$. A cap refuses new starts only: a run in progress finishes. */
+export const UnattendedBudget = Type.Object({ perDay: Type.Optional(usd), perMonth: Type.Optional(usd), runsPerDay: Type.Optional(Type.Integer({ minimum: 1, maximum: 100_000 })) }, strict);
 export type UnattendedBudget = Static<typeof UnattendedBudget>;
 
 export const UnattendedSettings = Type.Object({
@@ -71,7 +71,9 @@ export type TurnUsage = Static<typeof TurnUsage>;
  */
 export const SHIPPED_PRICES_DATE = '2026-11-28';
 export const SHIPPED_PRICES: ReadonlyArray<{ label: string; pattern: string } & ModelRates> = [
-  { label: 'Claude Opus 4.5 and later', pattern: 'opus[-_ ]?4[-_.]?[5-9]|opus[-_ ]?[5-9]', input: 5, cacheWrite: 6.25, cacheRead: 0.5, output: 25 },
+  // Opus 5 is priced like Sonnet: Claude Code's own cost for two real claude-opus-5.5 turns fits these rates within 11% and fits the older Opus rates at 1.5 to 1.9 times too high.
+  { label: 'Claude Opus 5 and later', pattern: 'opus[-_ ]?[5-9]', input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 },
+  { label: 'Claude Opus 4.5', pattern: 'opus[-_ ]?4[-_.]?[5-9]', input: 5, cacheWrite: 6.25, cacheRead: 0.5, output: 25 },
   { label: 'Claude Opus', pattern: 'opus', input: 15, cacheWrite: 18.75, cacheRead: 1.5, output: 75 },
   { label: 'Claude Sonnet', pattern: 'sonnet', input: 3, cacheWrite: 3.75, cacheRead: 0.3, output: 15 },
   { label: 'Claude Haiku 3.5', pattern: 'haiku[-_ ]?3', input: 0.8, cacheWrite: 1, cacheRead: 0.08, output: 4 },
